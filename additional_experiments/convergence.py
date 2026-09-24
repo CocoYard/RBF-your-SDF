@@ -88,9 +88,10 @@ def run_baselines(mesh, grid_len):
 
     out = RESULTS / 'out' / mesh
     out.mkdir(parents=True, exist_ok=True)
+    algos = _common.available(['rfta', 'mes', 'mc'])
     todo = [(algo, fn) for algo, fn in (('rfta', test_rfta), ('mes', test_mes),
                                         ('mc', test_mc))
-            if not list(out.glob(_common.PREFIX[algo] + '*.obj'))]
+            if algo in algos and not list(out.glob(_common.PREFIX[algo] + '*.obj'))]
     if not todo:
         print(f'[skip] {mesh} baselines — already reconstructed', flush=True)
         return

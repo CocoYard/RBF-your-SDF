@@ -17,6 +17,31 @@ python additional_experiments/degen_tol.py     # short-arc threshold 1e-4..1e-8
 Run them from anywhere; they locate the repo themselves. `_common.py` holds the
 shared plumbing and is not meant to be run directly.
 
+## Optional: MES baseline
+
+Ours, RFTA (from `gpytoolbox`) and marching cubes need nothing beyond the main
+install. MES (Kohlbrenner & Alexa, *A Polyhedral Construction of Empty Spheres
+in Discrete Distance Fields*, SIGGRAPH 2025) runs from the authors' own
+repository, which is not bundled here and has to be built separately. Without
+it the scripts print one notice and run every other method; the MES rows are
+simply missing from the CSVs.
+
+To include it, clone the repository with its CGAL submodule (it relies on a
+`Maximal_empty_spheres` package that is not in released CGAL yet) and build the
+executable its Python wrapper calls:
+
+```bash
+git clone --recursive https://github.com/maxkohlbrenner/maximal-empty-spheres.git \
+    third_party/maximal-empty-spheres
+cd third_party/maximal-empty-spheres/cgal
+cmake -B build -DCGAL_DIR=./cgal
+cmake --build build --parallel
+```
+
+`third_party/maximal-empty-spheres` at the repo root is where it is looked for;
+to use a checkout elsewhere, point `MES_DIR` at it instead. The baseline counts
+as installed once `$MES_DIR/cgal/build/empty_spheres_reconstruction` exists.
+
 ## What each one sweeps
 
 | script | models | samples | swept parameter |

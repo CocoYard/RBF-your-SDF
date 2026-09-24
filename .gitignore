@@ -2,7 +2,10 @@
 __pycache__/
 *.pyc
 *.so
+.vscode
+
 cpp/build/
 out/
 additional_experiments/results/
 additional_experiments/backup/
+third_party/maximal-empty-spheres/

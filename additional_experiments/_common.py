@@ -43,6 +43,26 @@ def load_sdf3d():
     return sdf3d
 
 
+_mes_warned = False
+
+
+def available(algos):
+    """`algos` without MES when the optional MES baseline is not installed.
+
+    MES needs a separate checkout and build (see README.md), so a sweep
+    without it still runs every other method instead of failing each cell.
+    """
+    global _mes_warned
+    from SDF_to_surface_3D import mes_available
+    if 'mes' not in algos or mes_available():
+        return list(algos)
+    if not _mes_warned:
+        print("[mes] baseline not installed -- skipping it. See 'Optional: MES "
+              "baseline' in additional_experiments/README.md to include it.", flush=True)
+        _mes_warned = True
+    return [a for a in algos if a != 'mes']
+
+
 def _cell_dir(exp, param, mesh, grid_len):
     # grid_len is part of the directory, not just the .obj name: the skip check
     # below globs on the algorithm prefix, so two grid_lens sharing a directory
@@ -70,7 +90,7 @@ def run_cell(exp, param, mesh, grid_len, algos, noise=0.0, bound=1.0, scatter=Fa
     out = cell / 'out' / mesh
     out.mkdir(parents=True, exist_ok=True)
 
-    todo = [a for a in algos if not list(out.glob(PREFIX[a] + '*.obj'))]
+    todo = [a for a in available(algos) if not list(out.glob(PREFIX[a] + '*.obj'))]
     if not todo:
         print(f'[skip] {exp}/{param}/{mesh} gl={grid_len} — already reconstructed', flush=True)
         return
