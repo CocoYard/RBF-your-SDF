@@ -60,20 +60,13 @@ class Options:
         self.noise = noise
         self.bound = bound
         self.scatter = scatter
+        
     def print(self):
-        print(f"Options: grid_len={self.grid_len}, name={self.name},"
-              f" max_iters={self.max_iters}, clamp={self.clamp},"
-              f" turn_off_short_arcs={self.turn_off_short_arcs},"
-              f" export_short_arcs={self.export_short_arcs},"
-              f" export_projections={self.export_projections},"
-              f" use_gt_gradients={self.use_gt_gradients},"
-              f" interpolator_type={self.interpolator_type},"
-              f" interp_partition={self.interp_partition}",
-              f" interp_overlap={self.interp_overlap}",
-              f" pair_local={self.pair_local}",
-              f" grad_optimizer={self.grad_optimizer}",
-              f" degen_tol={self.degen_tol}",
-              f" lr={self.lr}")
+        # Every setting, so a new field cannot be left out. Runtime state filled in
+        # by the runners (arrays, the C++ Options) is not a setting and is skipped.
+        runtime = ('gt_gradients', 'cpp_options')
+        print("Options: " + ", ".join(f"{k}={v}" for k, v in vars(self).items()
+                                      if k not in runtime))
 
 def generate_test_mesh_data( path_to_mesh, outbase, grid_len=10, save=False, noise=0.0, bound=1.0, scatter=False ):
     '''
@@ -538,7 +531,7 @@ if __name__ == "__main__":
     seed = 1
     data_dir = 'examples'
     for length in [30]:
-        options = Options(name='bunny', grid_len=length, verbose=False)
+        options = Options(name='bunny', grid_len=length, verbose=True)
         points, distances = test_our_method(options, save_gtmesh=False)
         # test_rfta(options, screening_weight=10, parallel=True, sdf=(points, distances))
         # test_mc(options, save_gtmesh=False, sdf=(points, distances))
