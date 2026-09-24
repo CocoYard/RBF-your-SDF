@@ -1,6 +1,9 @@
 import os
 import trimesh
-import gpytoolbox as gpy
+try:
+    import gpytoolbox as gpy
+except ModuleNotFoundError:  # no cp314 wheel; reach_for_the_arcs/PSR paths unavailable
+    gpy = None
 import igl
 import numpy as np
 import time
@@ -252,7 +255,7 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
     fname = f'mes_{grid_len}.obj'
     if options.bound < 1.0:
         fname = f'mes_{grid_len}_bound{options.bound}.obj'
-    gpy.write_mesh(f"{out_dir}/" + fname, *R_cgal)
+    trimesh.Trimesh(vertices=R_cgal[0], faces=R_cgal[1]).export(f"{out_dir}/" + fname)
 
     print(f"Exported: {out_dir}/" + fname)
 

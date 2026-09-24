@@ -28,6 +28,12 @@ the scripts with (e.g. an activated conda environment). Install the Python packa
 pip install -r requirements.txt
 ```
 
+Optionally, you can install RFTA for the related experiments with
+
+```bash
+pip install gpytoolbox
+```
+
 ## Running
 
 ```bash

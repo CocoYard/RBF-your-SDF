@@ -1,6 +1,5 @@
 numpy
 scipy
 trimesh
-gpytoolbox>=0.2.0  # reach_for_the_arcs
 libigl             # imported as `igl`
 scikit-image
