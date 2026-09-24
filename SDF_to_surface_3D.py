@@ -32,9 +32,9 @@ class Options:
         self.export_projections = export_projections  # write .ply files of the visible / invisible projections to out/<name>/
         self.use_gt_gradients = use_gt_gradients  # skip gradient estimation: fit once with the ground-truth gradients
         self.interpolator_type = interpolator_type  # 'Duchon' or 'PU'
-        self.interp_partition = interp_partition  # 'box' or 'sphere', only for PU interpolator
+        self.interp_partition = interp_partition  # 'box' or 'sphere', only for PU interpolator. Meaning the shape of the patch.
         self.interp_overlap = overlap
-        self.pair_local = pair_local  # PU: pair each local RBF solve with missing input/projection partners
+        self.pair_local = pair_local  # PU: pair each local RBF solve with missing input/projection partners without change to the patch size.
         self.post_processing = post_processing  # Lipschitz post-fix during surface extraction
         self.reg = reg  # RBF regularization
         self.iter_gradient_finding = iter_gradient_finding  # 'optimize' or 'sample'
@@ -60,7 +60,7 @@ class Options:
         self.noise = noise
         self.bound = bound
         self.scatter = scatter
-        
+
     def print(self):
         # Every setting, so a new field cannot be left out. Runtime state filled in
         # by the runners (arrays, the C++ Options) is not a setting and is skipped.
@@ -337,7 +337,7 @@ def test_our_method(options : Options, save_gtmesh=False):
     os.makedirs(out_dir, exist_ok=True)
     recon = trimesh.Trimesh(vertices=verts, faces=faces)
     clamp_str = '_clamp' if options.clamp else ''
-    post_str = 'post' if options.post_processing else ''
+    post_str = '_post' if options.post_processing else ''
     pair_str = '_pairLocal' if options.pair_local and options.interpolator_type == 'PU' else ''
     if options.cpp_dc:
         post_str = post_str + '_dc'
