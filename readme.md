@@ -28,12 +28,6 @@ the scripts with (e.g. an activated conda environment). Install the Python packa
 pip install -r requirements.txt
 ```
 
-Optionally, you can install RFTA for the related experiments with
-
-```bash
-pip install gpytoolbox
-```
-
 ## Running
 
 ```bash
@@ -46,7 +40,7 @@ mesh to `out/`. Edit the `__main__` block to pick another model, resolution or m
 ## Methods
 
 - **Ours** — `test_our_method`
-- **Reach for the Arcs** — `test_rfta` (via `gpytoolbox`)
+- **Reach for the Arcs** — `test_rfta` (optional, via `gpytoolbox`)
 - **Maximal Empty Spheres** — `test_mes` (optional, needs a separate build; see
   [additional_experiments/README.md](additional_experiments/README.md))
 - **Marching cubes** on the sample grid — `test_mc`
