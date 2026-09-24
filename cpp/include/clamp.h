@@ -1,0 +1,36 @@
+#pragma once
+
+#include "types.h"
+#include <Eigen/Dense>
+#include <functional>
+
+namespace sdf {
+
+/// Clamp gradients to visible arc boundaries.
+///
+/// For each point whose projection lands inside a neighbor's sphere,
+/// clamp the gradient to the closest point on the exposed arcs.
+/// Points with degenerate arcs are skipped (their gradients are set separately).
+///
+/// Modifies `gradients` in-place.
+///
+/// @param points         (N, 3) sample points
+/// @param values         (N,)   signed distances
+/// @param gradients      (N, 3) gradient directions (modified in-place)
+/// @param frozen         (N,) skip mask built from options.degenerate_pts;
+///                       frozen[i]=1 points are degenerate and never clamped
+/// @param batch          batch arc/cap data from compute_exposed_batch
+/// @param ngbrs_list     neighbor lists per sphere
+/// @param tolerance      clamping tolerance parameters
+/// @return number of clamped gradients
+int clamp_gradients_to_arcs(
+    const Eigen::MatrixXd& points,
+    const Eigen::VectorXd& values,
+    Eigen::MatrixXd& gradients,
+    const std::vector<char>& frozen,
+    const Options::BatchData& batch,
+    const std::vector<std::vector<int>>& ngbrs_list,
+    const SphereBVH& bvh,
+    const Tolerance& tolerance);
+
+}  // namespace sdf
