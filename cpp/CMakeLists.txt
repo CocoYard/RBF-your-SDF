@@ -38,8 +38,7 @@ include(FetchContent)
 
 # ── Eigen3 ───────────────────────────────────────────────────────────
 # Prefer system Eigen (brew on Mac, apt on Linux), then fetch 3.4.0.
-# Override with -DFORK_EIGEN=/path/to/eigen-src if needed (e.g. to avoid
-# the 3.4.90 dev-branch regression that caused CGAL MES memory blowup).
+# Override with -DFORK_EIGEN=/path/to/eigen-src if needed.
 set(FORK_EIGEN "" CACHE PATH "Optional pinned Eigen source dir")
 if(FORK_EIGEN AND EXISTS "${FORK_EIGEN}/Eigen/Core")
     add_library(Eigen3::Eigen INTERFACE IMPORTED)
@@ -62,58 +61,10 @@ else()
 endif()
 
 # ── CGAL ─────────────────────────────────────────────────────────────
-# Header-only for our usage. GMP + MPFR are compiled libs — they must
-# come from the system (apt: libgmp-dev libmpfr-dev / brew: gmp mpfr),
-# or auto-built below from source if missing.
-# The MES fork (maxkohlbrenner/maximal-empty-spheres) provides the
-# unreleased Maximal_empty_spheres package.
-set(MES_FORK_BASE "" CACHE PATH
-    "Optional local checkout of maxkohlbrenner/maximal-empty-spheres; otherwise auto-fetched")
-
-function(_collect_mes_includes root out_var)
-    # Find the directory that holds the per-package dirs. Two layouts seen:
-    #   maxkohlbrenner:  <root>/cgal/cgal/<pkg>/include/CGAL/...
-    #   legacy sibling:  <root>/<pkg>/include/CGAL/...
-    set(_pkg_root "")
-    foreach(_try "${root}/cgal/cgal" "${root}/cgal" "${root}")
-        if(IS_DIRECTORY "${_try}/Installation/include/CGAL")
-            set(_pkg_root "${_try}")
-            break()
-        endif()
-    endforeach()
-    set(_incs "")
-    if(_pkg_root)
-        file(GLOB _pkgs RELATIVE "${_pkg_root}" "${_pkg_root}/*")
-        foreach(p ${_pkgs})
-            if(IS_DIRECTORY "${_pkg_root}/${p}/include/CGAL")
-                list(APPEND _incs "${_pkg_root}/${p}/include")
-            endif()
-        endforeach()
-    endif()
-    set(${out_var} "${_incs}" PARENT_SCOPE)
-endfunction()
-
-set(MES_FORK_INCLUDES "")
-if(MES_FORK_BASE AND EXISTS "${MES_FORK_BASE}")
-    _collect_mes_includes("${MES_FORK_BASE}" MES_FORK_INCLUDES)
-endif()
-
-# Auto-fetch the MES fork if we couldn't find package includes on disk.
-if(NOT MES_FORK_INCLUDES)
-    message(STATUS "MES fork not found — fetching maxkohlbrenner/maximal-empty-spheres")
-    FetchContent_Declare(mes_fork
-        GIT_REPOSITORY https://github.com/maxkohlbrenner/maximal-empty-spheres.git
-        GIT_TAG        main
-        GIT_SHALLOW    TRUE)
-    FetchContent_GetProperties(mes_fork)
-    if(NOT mes_fork_POPULATED)
-        FetchContent_Populate(mes_fork)
-    endif()
-    _collect_mes_includes("${mes_fork_SOURCE_DIR}" MES_FORK_INCLUDES)
-    if(MES_FORK_INCLUDES)
-        message(STATUS "Using fetched MES fork at ${mes_fork_SOURCE_DIR}")
-    endif()
-endif()
+# Used by the power-diagram sphere-intersection path
+# (sphere_intersect_core.cpp). Header-only for our usage. GMP + MPFR are
+# compiled libs — they must come from the system (apt: libgmp-dev
+# libmpfr-dev / brew: gmp mpfr), or auto-built below from source if missing.
 
 # CGAL also needs Boost headers. Try system first, then fetch.
 find_path(BOOST_INCLUDE_DIR boost/config.hpp
@@ -138,25 +89,6 @@ find_library(GMPXX_LIBRARY NAMES gmpxx
     HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
 find_library(MPFR_LIBRARY  NAMES mpfr
     HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
-
-# Reuse the CGAL tree pulled in by the mes_fork submodule if present,
-# to avoid a second ~150MB fetch of CGAL/cgal@v5.6.2.
-if(NOT CGAL_INCLUDE_DIR)
-    set(_mes_cgal_root "")
-    if(MES_FORK_BASE AND EXISTS "${MES_FORK_BASE}/cgal/cgal")
-        set(_mes_cgal_root "${MES_FORK_BASE}/cgal/cgal")
-    elseif(DEFINED mes_fork_SOURCE_DIR AND EXISTS "${mes_fork_SOURCE_DIR}/cgal/cgal")
-        set(_mes_cgal_root "${mes_fork_SOURCE_DIR}/cgal/cgal")
-    endif()
-    if(_mes_cgal_root)
-        file(GLOB _cgal_pkg_incs LIST_DIRECTORIES true "${_mes_cgal_root}/*/include")
-        find_path(CGAL_INCLUDE_DIR CGAL/Epick_d.h
-            HINTS ${_cgal_pkg_incs} NO_DEFAULT_PATH)
-        if(CGAL_INCLUDE_DIR)
-            message(STATUS "Using CGAL from mes_fork submodule at ${_mes_cgal_root}")
-        endif()
-    endif()
-endif()
 
 if(NOT CGAL_INCLUDE_DIR)
     message(STATUS "CGAL headers not found — fetching v5.6.2 (large download)")
@@ -221,19 +153,15 @@ if(NOT GMP_LIBRARY OR NOT MPFR_LIBRARY OR NOT GMPXX_LIBRARY)
     message(STATUS "GMP/MPFR will be built locally under ${LOCAL_DEPS_PREFIX}")
 endif()
 
-# MES requires the Maximal_empty_spheres fork (not in stock CGAL). Without
-# its headers the include inside mes_contact_core.cpp won't resolve.
-if(CGAL_INCLUDE_DIR AND GMP_LIBRARY AND MPFR_LIBRARY AND MES_FORK_INCLUDES)
-    set(HAVE_MES_CONTACT TRUE)
-    message(STATUS "MES contact enabled (CGAL at ${CGAL_INCLUDE_DIR})")
+if(CGAL_INCLUDE_DIR AND GMP_LIBRARY AND MPFR_LIBRARY)
+    set(HAVE_CGAL TRUE)
+    message(STATUS "CGAL enabled (CGAL at ${CGAL_INCLUDE_DIR})")
 else()
-    set(HAVE_MES_CONTACT FALSE)
+    set(HAVE_CGAL FALSE)
     if(NOT CGAL_INCLUDE_DIR)
-        message(STATUS "MES contact disabled — CGAL headers missing")
-    elseif(NOT MES_FORK_INCLUDES)
-        message(STATUS "MES contact disabled — Maximal_empty_spheres fork not found at ${MES_FORK_BASE}")
+        message(STATUS "CGAL disabled — CGAL headers missing")
     else()
-        message(STATUS "MES contact disabled — GMP/MPFR missing")
+        message(STATUS "CGAL disabled — GMP/MPFR missing")
     endif()
 endif()
 
@@ -346,7 +274,6 @@ add_library(sdf_core STATIC
     src/sphere_intersect_core.cpp
     src/sphere_bvh.cpp
     src/existing_modules_adapter.cpp
-    src/mes_contact_core.cpp
 )
 
 target_include_directories(sdf_core PUBLIC
@@ -371,12 +298,10 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     target_compile_options(sdf_core PRIVATE -mcpu=apple-m1)
 endif()
 
-if(HAVE_MES_CONTACT)
-    # Fork's Maximal_empty_spheres headers MUST precede system CGAL so
-    # the unreleased package is picked up first.
+if(HAVE_CGAL)
     target_include_directories(sdf_core SYSTEM PUBLIC
-        ${MES_FORK_INCLUDES} ${CGAL_INCLUDE_DIR} ${BOOST_INCLUDE_DIR})
-    target_compile_definitions(sdf_core PUBLIC HAVE_MES_CONTACT CGAL_USE_GMPXX=1)
+        ${CGAL_INCLUDE_DIR} ${BOOST_INCLUDE_DIR})
+    target_compile_definitions(sdf_core PUBLIC HAVE_CGAL CGAL_USE_GMPXX=1)
     target_link_libraries(sdf_core PUBLIC
         ${GMPXX_LIBRARY} ${MPFR_LIBRARY} ${GMP_LIBRARY})
     if(GMP_MPFR_FETCHED)
@@ -385,10 +310,6 @@ if(HAVE_MES_CONTACT)
         add_dependencies(sdf_core gmp_build mpfr_build)
         target_include_directories(sdf_core SYSTEM PUBLIC ${GMP_MPFR_LOCAL_INCLUDE})
     endif()
-    # EIGEN_USE_BLAS (Accelerate) interacts pathologically with CGAL MES,
-    # blowing up memory. Undefine it for this TU only.
-    set_source_files_properties(src/mes_contact_core.cpp PROPERTIES
-        COMPILE_OPTIONS "-UEIGEN_USE_BLAS")
 endif()
 
 if(APPLE)

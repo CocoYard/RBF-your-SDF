@@ -30,7 +30,6 @@ struct Options {
     bool clamp         = true;
     bool turn_off_short_arcs = false;
     double reg = 1e-5;  // regularization for DuchonInterpolator
-    int use_MES = 0;  // -1 = off, 0 = adaptive (vis_per_sample_area < 10), 1 = force on
     bool export_projections = true;   // write PLY visualization files after main_algorithm
     bool export_short_arcs  = true;   // write PLY of degenerate-arc points after init
     bool verbose = true;              // if false, main_algorithm suppresses stdout logging

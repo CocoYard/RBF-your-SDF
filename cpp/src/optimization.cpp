@@ -1,7 +1,6 @@
 #include "optimization.h"
 #include "visibility.h"
 #include "clamp.h"
-#include "mes_contact_core.h"
 #include "thread_policy.h"
 #include <iostream>
 #include <cmath>
@@ -32,7 +31,6 @@ Eigen::MatrixXd iterative_projection_3d(
     for (const auto& [i, pts] : options.degenerate_pts)
         if (i >= 0 && i < N) frozen[i] = 1;
     bool clamp_used = false;
-    bool MES_used = false;
     Eigen::VectorXi vis_cached;
     bool vis_cache_valid = false;
     double t_loop_fit = 0;  // accumulate the per-iteration RBF fits (in-loop)
@@ -161,42 +159,7 @@ Eigen::MatrixXd iterative_projection_3d(
                     options.ngbrs_list, *options.sphere_bvh, options.tolerance);
                     sdf::restore_threads(_saved);    
                 clamp_used = true;
-                vis_cache_valid = false;  // MES rewrote some gradients; cache stale
-            }
-        }
-
-        // ── MES contact points: when visibility improvement stalls ─
-        // Mirrors optimization.py:589-594. Trigger once when new-vs-old
-        // visibility gain < 1% of N. For points that are still invisible
-        // and have a valid MES normal, override new_gradients with that
-        // normal. vis_mask above is the union of old/new visibility.
-        if (options.use_MES != -1 && it > 5) {
-            int vis_old_sum = vis_old.sum();
-            double gain = (double)(visible_num - vis_old_sum) / N;
-            double vis_per_sample_area =  visible_num / (std::cbrt(N) * std::cbrt(N));  // heuristic for point density in visible region
-            // double vis_per_sample_area = 0;
-            bool density_ok = (options.use_MES == 1) || (vis_per_sample_area < 10);
-            if (!MES_used && gain < 0.01 && density_ok) {
-                if (options.verbose)
-                    std::cout << "========= Using MES points... =========\n";
-                auto mes_t0 = std::chrono::steady_clock::now();
-                Eigen::MatrixXd contact_pts, mes_normals;
-                mes_contact_core::contact_points_from_sdf(
-                    points, values, /*filter_bbox=*/true, /*debug_level=*/0,
-                    contact_pts, mes_normals);
-                for (int i = 0; i < N; i++) {
-                    bool valid = !std::isnan(mes_normals(i, 0));
-                    bool not_visible = !vis_mask(i);
-                    if (valid && not_visible)
-                        new_gradients.row(i) = mes_normals.row(i);
-                }
-                auto mes_t1 = std::chrono::steady_clock::now();
-                double mes_ms = std::chrono::duration<double, std::milli>(mes_t1 - mes_t0).count();
-                if (options.verbose)
-                    std::cout << "MES contact points elapsed: " << mes_ms/1000 << " s\n";
-
-                MES_used = true;
-                vis_cache_valid = false;  // MES rewrote some gradients; cache stale
+                vis_cache_valid = false;  // clamp rewrote some gradients; cache stale
             }
         }
 

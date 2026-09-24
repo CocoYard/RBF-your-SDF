@@ -19,7 +19,7 @@
 
 #include "full_compute_switch.h"
 
-#ifdef HAVE_MES_CONTACT
+#ifdef HAVE_CGAL
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Regular_triangulation_vertex_base_3.h>
 #include <CGAL/Regular_triangulation_cell_base_3.h>
@@ -155,7 +155,7 @@ void find_intersections_by_power_diagram(const double* centers, const double* ra
     if (out_hidden) *out_hidden = 0;
     if (n == 0) return;
 
-#ifdef HAVE_MES_CONTACT
+#ifdef HAVE_CGAL
     using K   = CGAL::Exact_predicates_inexact_constructions_kernel;
     using Vbb = CGAL::Regular_triangulation_vertex_base_3<K>;
     using Vb  = CGAL::Triangulation_vertex_base_with_info_3<int, K, Vbb>;
@@ -339,7 +339,7 @@ void find_intersections_by_power_diagram(const double* centers, const double* ra
     (void)centers; (void)radii;
     static bool warned = false;
     if (!warned) {
-        std::cerr << "[sphere_intersect_core] HAVE_MES_CONTACT not defined; "
+        std::cerr << "[sphere_intersect_core] HAVE_CGAL not defined; "
                      "find_intersections_by_power_diagram returning empty neighbors. "
                      "Rebuild with CGAL to enable.\n";
         warned = true;

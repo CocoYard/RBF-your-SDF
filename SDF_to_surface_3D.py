@@ -623,7 +623,6 @@ def _build_cpp_options(options : Options):
     cpp_opts.max_iters = options.max_iters
     cpp_opts.clamp = options.clamp
     cpp_opts.reg = options.reg
-    cpp_opts.use_MES = options.use_MES
     cpp_opts.turn_off_short_arcs = options.turn_off_short_arcs
     cpp_opts.interpolator_type = options.interpolator_type
     cpp_opts.interp_partition = options.interp_partition

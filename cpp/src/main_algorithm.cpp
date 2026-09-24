@@ -581,9 +581,6 @@ void export_projection_ply(
         + options.name + "_"
         + std::to_string(options.grid_len) + "_"
         + std::to_string(options.max_iters);
-    if (options.use_MES == -1) stem += "_noMES";
-    else if (options.use_MES == 1) stem += "_MESforce";
-    else stem += "_MES";
 
     std::vector<int> vis_idx, invis_idx;
     for (int i = 0; i < N; i++) {
