@@ -149,7 +149,7 @@ static void bvh_query(
 // union boundary, so no neighbor is needed to clip it.
 void find_intersections_by_power_diagram(const double* centers, const double* radii, int n,
                         std::vector<std::vector<int>>& out_neighbors,
-                        int* out_hidden) {
+                        int* out_hidden, bool verbose) {
     
     out_neighbors.assign(n, {});
     if (out_hidden) *out_hidden = 0;
@@ -208,8 +208,9 @@ void find_intersections_by_power_diagram(const double* centers, const double* ra
             empty_count++;
         }
     }
-    std::cout << "[find_intersections_by_power_diagram] " << empty_count
-              << " spheres have no neighbors (fully dominated in power diagram sense)\n";
+    if (verbose)
+        std::cout << "[find_intersections_by_power_diagram] " << empty_count
+                  << " spheres have no neighbors (fully dominated in power diagram sense)\n";
 
     // A weighted point is "hidden" (redundant) when its power cell is empty,
     // so it never becomes a vertex of the RT. CGAL keeps such points inside
@@ -329,12 +330,13 @@ void find_intersections_by_power_diagram(const double* centers, const double* ra
             if (!out_neighbors[hidx].empty()) hidden_with_neighbors++;
         }
     }
-    std::cout << "[find_intersections_by_power_diagram] assigned neighbors to "
-              << hidden_with_neighbors << " / " << hidden_count
-              << " hidden spheres via containing RT cell(s)\n";
-
-    std::cout << "hidden points: " << hidden_count
-              << " (n - num_vertices = " << (n - (int)rt.number_of_vertices()) << ")\n";
+    if (verbose) {
+        std::cout << "[find_intersections_by_power_diagram] assigned neighbors to "
+                  << hidden_with_neighbors << " / " << hidden_count
+                  << " hidden spheres via containing RT cell(s)\n";
+        std::cout << "hidden points: " << hidden_count
+                  << " (n - num_vertices = " << (n - (int)rt.number_of_vertices()) << ")\n";
+    }
 #else
     (void)centers; (void)radii;
     static bool warned = false;

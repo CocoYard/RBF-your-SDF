@@ -156,7 +156,8 @@ Eigen::MatrixXd iterative_projection_3d(
                 clamped_cnt = clamp_gradients_to_arcs(
                     points, values, new_gradients,
                     frozen, options.batch,
-                    options.ngbrs_list, *options.sphere_bvh, options.tolerance);
+                    options.ngbrs_list, *options.sphere_bvh, options.tolerance,
+                    options.verbose);
                     sdf::restore_threads(_saved);    
                 clamp_used = true;
                 vis_cache_valid = false;  // clamp rewrote some gradients; cache stale

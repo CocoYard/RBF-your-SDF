@@ -16,7 +16,7 @@ from util import mesh_distances
 seed = None
 
 class Options:
-    def __init__(self, grid_len=20, gt_mesh=None, clamp=True, max_iters=10, name='horse', lr=0.2, optim_steps=5,
+    def __init__(self, grid_len=20, clamp=True, max_iters=10, name='horse', lr=0.2, optim_steps=5,
                  turn_off_short_arcs=False, export_short_arcs=False, export_projections=False, reg=0,
                  use_gt_gradients=False, interpolator_type='PU', interp_partition='sphere', overlap=0.2, cpp_dc=True,
                  post_processing=False, iter_gradient_finding='optimize', verbose=True,
@@ -28,20 +28,20 @@ class Options:
         self.turn_off_short_arcs = turn_off_short_arcs
         self.name = name
         self.path_to_obj = f'{data_dir}/{name}.obj'
-        self.export_short_arcs = export_short_arcs  # whether to export short arcs .glb for visualization
-        self.export_projections = export_projections  # export gradients .glb for visualization
-        self.use_gt_gradients = use_gt_gradients
+        self.export_short_arcs = export_short_arcs  # write a .ply of the short-arc (degenerate) points to out/<name>/
+        self.export_projections = export_projections  # write .ply files of the visible / invisible projections to out/<name>/
+        self.use_gt_gradients = use_gt_gradients  # skip gradient estimation: fit once with the ground-truth gradients
         self.interpolator_type = interpolator_type  # 'Duchon' or 'PU'
-        self.interp_partition = interp_partition  # 'box' or 'fps' or 'sphere', only for PU interpolator
+        self.interp_partition = interp_partition  # 'box' or 'sphere', only for PU interpolator
         self.interp_overlap = overlap
         self.pair_local = pair_local  # PU: pair each local RBF solve with missing input/projection partners
-        self.post_processing = post_processing
-        self.reg = reg
+        self.post_processing = post_processing  # Lipschitz post-fix during surface extraction
+        self.reg = reg  # RBF regularization
         self.iter_gradient_finding = iter_gradient_finding  # 'optimize' or 'sample'
-        self.cpp_dc = cpp_dc
+        self.cpp_dc = cpp_dc  # extract with dual contouring (else marching cubes)
         self.verbose = verbose
         self.lr = lr
-        self.optim_steps = optim_steps  # quasi-Newton steps per outer iteration
+        self.optim_steps = optim_steps  # optimizer steps per point in each outer iteration
         # solver behind iter_gradient_finding='optimize':
         # 'ascent' = fixed-step projected gradient ascent (lr is its step size),
         # 'lbfgspp' = one LBFGS++ solve per point
@@ -53,8 +53,9 @@ class Options:
         # midpoint a surface candidate. Swept by additional_experiments/degen_tol.py.
         self.degen_tol = degen_tol
 
-        self.gt_gradients = None  # set it manually if you want to use GT gradients for testing, e.g. from the intermediate output of generate_test_mesh_data
-        self.gt_mesh = gt_mesh  # set it manually if you want to compute distances to GT mesh at the end, e.g. from the intermediate output of generate_test_mesh_data
+        # Filled from generate_test_mesh_data by test_our_method / get_tangent_points;
+        # only used when use_gt_gradients.
+        self.gt_gradients = None
 
         self.noise = noise
         self.bound = bound
@@ -315,13 +316,13 @@ def test_our_method(options : Options, save_gtmesh=False):
     base_name = path_to_obj.split('/')[-1].split('.')[0]
     mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, noise=options.noise, bound=options.bound, scatter=options.scatter)
     options.gt_gradients = gt_gradients
-    options.gt_mesh = mesh
 
     # Create and fit the interpolator
     timer = time.perf_counter()
     result = _import_sdf_cpp().main_algorithm(points, distances, _build_cpp_options(options))
     _vis = np.asarray(result.visibility_mask).ravel()
-    print(f"Final visibility: {int((_vis != 0).sum())}/{len(_vis)} ({100.0 * (_vis != 0).mean():.2f}%)")
+    if options.verbose:
+        print(f"Final visibility: {int((_vis != 0).sum())}/{len(_vis)} ({100.0 * (_vis != 0).mean():.2f}%)")
     print(f"  ⏱  {'Interpolator fitted':<30} {time.perf_counter() - timer:>7.2f} s")
 
     # ── surface extraction (dual contouring, optional Lipschitz post-fix) ──
@@ -420,7 +421,6 @@ def get_tangent_points(options : Options, method, save_gtmesh=False, screening_w
     base_name = path_to_obj.split('/')[-1].split('.')[0]
     mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh)
     options.gt_gradients = gt_gradients
-    options.gt_mesh = mesh
     if method == TangentPoints.OURS:
         # Iterative projection (C++ pipeline, same as test_our_method): tangent points are
         # the SDF-sample projections onto the surface (points - distance * gradient). The
@@ -456,11 +456,8 @@ def get_tangent_points(options : Options, method, save_gtmesh=False, screening_w
         # Ground truth: the tangent point of each SDF sample is its closest point on the GT
         # mesh (the exact projection onto the true surface), 1:1 with points -- valid for
         # both reconstruction paths.
-        gt = options.gt_mesh
-        if gt is None:
-            raise ValueError("GT tangent points require options.gt_mesh (set by generate_test_mesh_data).")
-        V = np.asarray(gt.vertices, dtype=np.float64)
-        F = np.asarray(gt.faces, dtype=np.int32)
+        V = np.asarray(mesh.vertices, dtype=np.float64)
+        F = np.asarray(mesh.faces, dtype=np.int32)
         _, _, closest = igl.point_mesh_squared_distance(points, V, F)
         tangent_pts = np.asarray(closest, dtype=np.float64)
     else:
@@ -541,7 +538,7 @@ if __name__ == "__main__":
     seed = 1
     data_dir = 'examples'
     for length in [30]:
-        options = Options(name='bunny', grid_len=length)
+        options = Options(name='bunny', grid_len=length, verbose=False)
         points, distances = test_our_method(options, save_gtmesh=False)
         # test_rfta(options, screening_weight=10, parallel=True, sdf=(points, distances))
         # test_mc(options, save_gtmesh=False, sdf=(points, distances))

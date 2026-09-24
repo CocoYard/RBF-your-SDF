@@ -31,6 +31,7 @@ int clamp_gradients_to_arcs(
     const Options::BatchData& batch,
     const std::vector<std::vector<int>>& ngbrs_list,
     const SphereBVH& bvh,
-    const Tolerance& tolerance);
+    const Tolerance& tolerance,
+    bool verbose = false);
 
 }  // namespace sdf

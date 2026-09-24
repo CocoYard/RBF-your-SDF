@@ -137,7 +137,8 @@ int clamp_gradients_to_arcs(
     const Options::BatchData& batch,
     const std::vector<std::vector<int>>& ngbrs_list,
     const SphereBVH& bvh,
-    const Tolerance& tolerance)
+    const Tolerance& tolerance,
+    bool verbose)
 {
     int N = (int)points.rows();
     double clamp_tol = tolerance.clamp_sdf_tol;
@@ -222,16 +223,17 @@ int clamp_gradients_to_arcs(
         // Otherwise keep original gradient
     }
     auto t_loop1 = std::chrono::high_resolution_clock::now();
-    std::cout << "  [clamp] N=" << N
-              << " clamp_tol=" << clamp_tol
-              << " fast_hits=" << fast_hits.load()
-              << " bvh_fallbacks=" << bvh_fallbacks.load()
-              << " arc_queries=" << arc_queries.load()
-              << " wall=" << std::chrono::duration<double>(t_loop1 - t_loop0).count() << "s\n";
-
-    if (debug_cnt > 0)
+    if (verbose) {
+        std::cout << "  [clamp] N=" << N
+                  << " clamp_tol=" << clamp_tol
+                  << " fast_hits=" << fast_hits.load()
+                  << " bvh_fallbacks=" << bvh_fallbacks.load()
+                  << " arc_queries=" << arc_queries.load()
+                  << " wall=" << std::chrono::duration<double>(t_loop1 - t_loop0).count() << "s\n";
+        std::cout << " there are " << clamped_cnt << " samples clamped to arcs\n";
+    }
+    if (debug_cnt > 0)  // a real problem, so reported regardless of verbose
         std::cout << "\n [Warning] there are " << debug_cnt << " samples whose RT neighbors are not enough for visibility testing\n";
-    std::cout << " there are " << clamped_cnt << " samples clamped to arcs\n";
     return clamped_cnt;
 }
 

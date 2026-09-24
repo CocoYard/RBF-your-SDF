@@ -10,7 +10,7 @@ namespace sphere_intersect_core {
     // Find all sphere-sphere intersections by power diagram. Fills per-sphere adjacency lists.
     void find_intersections_by_power_diagram(const double* centers, const double* radii, int n,
                             std::vector<std::vector<int>>& out_neighbors,
-                            int* out_hidden = nullptr);
+                            int* out_hidden = nullptr, bool verbose = false);
     // Find all sphere-sphere intersections. Fills per-sphere adjacency lists.
     void find_intersections(const double* centers, const double* radii, int n,
                             std::vector<std::vector<int>>& out_neighbors);
@@ -82,17 +82,18 @@ void get_visible_arcs(
         auto t = clk::now();
         sphere_intersect_core::find_intersections_by_power_diagram(
             pts_rm.data(), radii.data(), N, options.ngbrs_list,
-            &options.hidden_points);
+            &options.hidden_points, options.verbose);
         if (false) {
             std::ofstream hf("logs/degen_stats.txt", std::ios::app);
             hf << options.grid_len << " " << options.hidden_points << "\n";
         }
         // sphere_intersect_core::find_intersections(
         //     pts_rm.data(), radii.data(), N, options.ngbrs_list);
-        // print the distribution of neighbor counts
-        std::cout << "Neighbor count distribution (capped at 20):\n";
-        for (size_t i = 0; i < 20; i++) {
-            std::cout << "  " << i << ": " << options.ngbrs_list[i].size() << "\n";
+        if (options.verbose) {
+            // Neighbor counts of the first 20 spheres, as a quick sanity check.
+            std::cout << "Neighbor count distribution (capped at 20):\n";
+            for (size_t i = 0; i < 20 && i < options.ngbrs_list.size(); i++)
+                std::cout << "  " << i << ": " << options.ngbrs_list[i].size() << "\n";
         }
         if (options.verbose)
             std::cout << "[get_visible_arcs] find_intersections: " << ms_since(t)/1000.0 << " s\n";

@@ -35,17 +35,18 @@ struct Options {
     bool verbose = true;              // if false, main_algorithm suppresses stdout logging
 
     std::string interpolator_type = "PU";     // "PU" or "Duchon"
-    std::string interp_partition  = "box";    // "box" or "sphere"
+    std::string interp_partition  = "box";    // "box" or "sphere" (any value other than "box" is treated as "sphere")
     double interp_overlap         = 0.5;
     bool pair_local               = true;     // PU: pair each local RBF solve with missing input/projection partners
     std::string iter_gradient_finding = "optimize";  // "optimize" or "sample"
     // Solver behind iter_gradient_finding == "optimize":
     //   "ascent"  — the original fixed-step projected gradient ascent
+    //   "bfgs"    — batched BFGS
     //   "lbfgspp" — one LBFGS++ solve per point (needs SDF_WITH_LBFGSPP)
     std::string grad_optimizer = "ascent";
     // Step size for "ascent"; "lbfgspp" ignores it.
     double lr = 0.2;
-    int optim_steps = 5;  // quasi-Newton steps per outer iteration in optimize_best_gradients
+    int optim_steps = 5;  // optimizer steps per point per outer iteration in optimize_best_gradients
 
     // Total exposed-arc length (unit: length, not radians) below which a
     // sphere's exposed region is collapsed to a tangent point and its
