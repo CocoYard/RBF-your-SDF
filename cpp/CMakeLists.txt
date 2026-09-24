@@ -9,64 +9,50 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# CPU tuning — applied globally so sdf_core and sdf_cpp share the same
-# Eigen vectorization. Per-target -march on sdf_core only causes Eigen
-# ABI mismatch across TU boundaries → segfault in PUInterpolator::fit.
+option(BUILD_PYTHON_BINDINGS "Build pybind11 Python module"                  ON)
+option(USE_OPENMP            "Enable OpenMP parallelism"                      ON)
+option(SDF_WITH_LBFGSPP      "Build the LBFGS++ reference gradient optimizer" ON)
+
+# CPU tuning — applied globally so sdf_core and sdf_cpp share the same Eigen
+# vectorization. Tuning only one target causes an Eigen ABI mismatch across
+# TU boundaries → segfault in PUInterpolator::fit.
 #
-# Default ``-march=native`` lets the local build pick up whatever ISA
-# extensions the build host supports (AVX-512 on capable CPUs, AVX2
-# elsewhere). This is the right choice when building and running on the
-# same machine.
-#
-# Override on heterogeneous clusters where the build host (e.g. a login
-# node) has more ISA features than some compute nodes (e.g. AMD or older
-# Intel without AVX-512). The portable baseline is x86-64-v3 (AVX2 +
-# FMA3 + BMI2):
-#   cmake -DSDF_MARCH=x86-64-v3 ..
+# ``native`` suits building and running on the same machine. For a binary
+# that must also run elsewhere, pick the oldest target CPU instead:
+#   x86 clusters (login node with more ISA features than some compute nodes):
+#     cmake -DSDF_MARCH=x86-64-v3 ..   (AVX2 + FMA3 + BMI2)
+#   Apple Silicon, any M-series chip:
+#     cmake -DSDF_MCPU=apple-m1 ..
 set(SDF_MARCH "native" CACHE STRING
     "Compiler -march flag (use 'x86-64-v3' for cluster-portable builds)")
-if(NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+set(SDF_MCPU "native" CACHE STRING
+    "Compiler -mcpu flag on Apple Silicon (use 'apple-m1' to run on any M-series)")
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    add_compile_options(-mcpu=${SDF_MCPU})
+elseif(NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-march=${SDF_MARCH})
 endif()
 
-# ── Options ──────────────────────────────────────────────────────────
-option(BUILD_PYTHON_BINDINGS "Build pybind11 Python module" ON)
-option(USE_OPENMP            "Enable OpenMP parallelism"    ON)
-
-# ── FetchContent ─────────────────────────────────────────────────────
 include(FetchContent)
 
 # ── Eigen3 ───────────────────────────────────────────────────────────
-# Prefer system Eigen (brew on Mac, apt on Linux), then fetch 3.4.0.
-# Override with -DFORK_EIGEN=/path/to/eigen-src if needed.
-set(FORK_EIGEN "" CACHE PATH "Optional pinned Eigen source dir")
-if(FORK_EIGEN AND EXISTS "${FORK_EIGEN}/Eigen/Core")
-    add_library(Eigen3::Eigen INTERFACE IMPORTED)
-    set_target_properties(Eigen3::Eigen PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${FORK_EIGEN}")
-    message(STATUS "Using fork Eigen at ${FORK_EIGEN}")
-else()
-    find_package(Eigen3 3.3 QUIET NO_MODULE)
-    if(NOT Eigen3_FOUND)
-        message(STATUS "Eigen3 not found — fetching 3.4.0")
-        set(EIGEN_BUILD_DOC    OFF CACHE BOOL "" FORCE)
-        set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
-        set(BUILD_TESTING      OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(eigen
-            GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-            GIT_TAG        3.4.0
-            GIT_SHALLOW    TRUE)
-        FetchContent_MakeAvailable(eigen)
-    endif()
+# System Eigen (brew / apt) if present, otherwise fetch 3.4.0.
+find_package(Eigen3 3.3 QUIET NO_MODULE)
+if(NOT Eigen3_FOUND)
+    message(STATUS "Eigen3 not found — fetching 3.4.0")
+    set(EIGEN_BUILD_DOC       OFF CACHE BOOL "" FORCE)
+    set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING         OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(eigen
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG        3.4.0
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(eigen)
 endif()
 
-# ── CGAL ─────────────────────────────────────────────────────────────
-# Used by the power-diagram sphere-intersection path
-# (sphere_intersect_core.cpp). Header-only for our usage. GMP + MPFR are
-# compiled libs — they must come from the system (apt: libgmp-dev
-# libmpfr-dev / brew: gmp mpfr), or auto-built below from source if missing.
-
-# CGAL also needs Boost headers. Try system first, then fetch.
+# ── CGAL (+ Boost headers, GMP/MPFR) ─────────────────────────────────
+# Required: the sphere-neighbor search in get_visible_arcs goes through the
+# power diagram in sphere_intersect_core.cpp. Header-only for our usage.
 find_path(BOOST_INCLUDE_DIR boost/config.hpp
     HINTS /opt/homebrew/include /usr/local/include /usr/include)
 if(NOT BOOST_INCLUDE_DIR)
@@ -74,22 +60,12 @@ if(NOT BOOST_INCLUDE_DIR)
     FetchContent_Declare(boost
         URL      https://archives.boost.io/release/1.84.0/source/boost_1_84_0.tar.bz2
         URL_HASH SHA256=cc4b893acf645c9d4b698e9a0f08ca8846aa5d6c68275c14c3e7949c24109454)
-    FetchContent_GetProperties(boost)
-    if(NOT boost_POPULATED)
-        FetchContent_Populate(boost)
-    endif()
+    FetchContent_Populate(boost)
     set(BOOST_INCLUDE_DIR "${boost_SOURCE_DIR}")
 endif()
 
-find_path(CGAL_INCLUDE_DIR CGAL/Epick_d.h
+find_path(CGAL_INCLUDE_DIR CGAL/Regular_triangulation_3.h
     HINTS /opt/homebrew/include /usr/local/include /usr/include)
-find_library(GMP_LIBRARY   NAMES gmp
-    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
-find_library(GMPXX_LIBRARY NAMES gmpxx
-    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
-find_library(MPFR_LIBRARY  NAMES mpfr
-    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
-
 if(NOT CGAL_INCLUDE_DIR)
     message(STATUS "CGAL headers not found — fetching v5.6.2 (large download)")
     FetchContent_Declare(cgal
@@ -97,91 +73,22 @@ if(NOT CGAL_INCLUDE_DIR)
         GIT_TAG        v5.6.2
         GIT_SHALLOW    TRUE)
     FetchContent_Populate(cgal)
-    # CGAL git repo uses per-package layout: Package/include/CGAL/...
-    file(GLOB _cgal_pkg_incs LIST_DIRECTORIES true "${cgal_SOURCE_DIR}/*/include")
-    find_path(CGAL_INCLUDE_DIR CGAL/Epick_d.h
-        HINTS ${_cgal_pkg_incs} NO_DEFAULT_PATH)
+    # The CGAL git repo uses a per-package layout: <Package>/include/CGAL/...
+    file(GLOB CGAL_INCLUDE_DIR LIST_DIRECTORIES true "${cgal_SOURCE_DIR}/*/include")
 endif()
 
-# ── GMP + MPFR auto-build (sudo-less path) ───────────────────────────
-# If system GMP/MPFR are missing (no apt install libgmp-dev libmpfr-dev),
-# fetch and build them locally via autotools into build/local-deps/. Static
-# linking, -fPIC so they can go into sdf_cpp.so. One-time ~3–5 min build.
-set(GMP_MPFR_FETCHED FALSE)
-if(NOT GMP_LIBRARY OR NOT MPFR_LIBRARY OR NOT GMPXX_LIBRARY)
-    include(ExternalProject)
-    set(LOCAL_DEPS_PREFIX "${CMAKE_BINARY_DIR}/local-deps")
-    file(MAKE_DIRECTORY "${LOCAL_DEPS_PREFIX}/include")
+# GMP + MPFR speed up CGAL's exact fallback but are not required: without them
+# CGAL uses Boost.Multiprecision, so sudo-less machines need nothing extra.
+find_library(GMP_LIBRARY  NAMES gmp
+    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
+find_library(MPFR_LIBRARY NAMES mpfr
+    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
 
-    # GCC 15 defaults to C23; GMP 6.3.0 / MPFR 4.2.1 configure tests rely on
-    # pre-ANSI function declarations. Force -std=gnu17 so configure passes.
-    ExternalProject_Add(gmp_build
-        URL      https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
-        URL_HASH SHA256=a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898
-        PREFIX   ${CMAKE_BINARY_DIR}/gmp
-        CONFIGURE_COMMAND env "CFLAGS=-O2 -std=gnu17 -fPIC" "CXXFLAGS=-O2 -std=gnu++17 -fPIC" <SOURCE_DIR>/configure
-            --prefix=${LOCAL_DEPS_PREFIX}
-            --enable-cxx --with-pic
-            --disable-shared --enable-static
-        BUILD_COMMAND   make -j
-        INSTALL_COMMAND make install
-        BUILD_IN_SOURCE 1
-        BUILD_BYPRODUCTS
-            ${LOCAL_DEPS_PREFIX}/lib/libgmp.a
-            ${LOCAL_DEPS_PREFIX}/lib/libgmpxx.a)
+# ── Header-only libraries ────────────────────────────────────────────
+# nanoflann is vendored under third_party/.
+set(NANOFLANN_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nanoflann/include)
 
-    ExternalProject_Add(mpfr_build
-        URL      https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz
-        URL_HASH SHA256=277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2
-        PREFIX   ${CMAKE_BINARY_DIR}/mpfr
-        DEPENDS  gmp_build
-        CONFIGURE_COMMAND env "CFLAGS=-O2 -std=gnu17 -fPIC" "CXXFLAGS=-O2 -std=gnu++17 -fPIC" <SOURCE_DIR>/configure
-            --prefix=${LOCAL_DEPS_PREFIX}
-            --with-gmp=${LOCAL_DEPS_PREFIX}
-            --with-pic
-            --disable-shared --enable-static
-        BUILD_COMMAND   make -j
-        INSTALL_COMMAND make install
-        BUILD_IN_SOURCE 1
-        BUILD_BYPRODUCTS ${LOCAL_DEPS_PREFIX}/lib/libmpfr.a)
-
-    set(GMP_LIBRARY   ${LOCAL_DEPS_PREFIX}/lib/libgmp.a)
-    set(GMPXX_LIBRARY ${LOCAL_DEPS_PREFIX}/lib/libgmpxx.a)
-    set(MPFR_LIBRARY  ${LOCAL_DEPS_PREFIX}/lib/libmpfr.a)
-    set(GMP_MPFR_LOCAL_INCLUDE ${LOCAL_DEPS_PREFIX}/include)
-    set(GMP_MPFR_FETCHED TRUE)
-    message(STATUS "GMP/MPFR will be built locally under ${LOCAL_DEPS_PREFIX}")
-endif()
-
-if(CGAL_INCLUDE_DIR AND GMP_LIBRARY AND MPFR_LIBRARY)
-    set(HAVE_CGAL TRUE)
-    message(STATUS "CGAL enabled (CGAL at ${CGAL_INCLUDE_DIR})")
-else()
-    set(HAVE_CGAL FALSE)
-    if(NOT CGAL_INCLUDE_DIR)
-        message(STATUS "CGAL disabled — CGAL headers missing")
-    else()
-        message(STATUS "CGAL disabled — GMP/MPFR missing")
-    endif()
-endif()
-
-# ── nanoflann ────────────────────────────────────────────────────────
-find_path(NANOFLANN_INCLUDE_DIR nanoflann.hpp
-    PATHS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nanoflann/include
-    NO_DEFAULT_PATH)
-if(NOT NANOFLANN_INCLUDE_DIR)
-    message(STATUS "nanoflann not found — fetching v1.5.5")
-    set(NANOFLANN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(NANOFLANN_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(nanoflann
-        GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
-        GIT_TAG        v1.5.5
-        GIT_SHALLOW    TRUE)
-    FetchContent_MakeAvailable(nanoflann)
-    set(NANOFLANN_INCLUDE_DIR ${nanoflann_SOURCE_DIR}/include)
-endif()
-
-# ── libigl ───────────────────────────────────────────────────────────
+# libigl: only for igl/marching_cubes.h.
 FetchContent_Declare(libigl
     GIT_REPOSITORY https://github.com/libigl/libigl.git
     GIT_TAG        v2.5.0
@@ -190,62 +97,59 @@ FetchContent_GetProperties(libigl)
 if(NOT libigl_POPULATED)
     FetchContent_Populate(libigl)
 endif()
-set(LIBIGL_INCLUDE_DIR ${libigl_SOURCE_DIR}/include)
 
-# ── LBFGS++ ──────────────────────────────────────────────────────────
-# Header-only, Eigen-based. Only used by the reference implementation of
-# optimize_best_gradients (LBFGSPP method) that the batched in-house BFGS is
-# benchmarked against — see Interpolator::optimize_best_gradients.
-option(SDF_WITH_LBFGSPP "Build the LBFGS++ reference gradient optimizer" ON)
+# LBFGS++: only for the reference optimize_best_gradients (grad_optimizer
+# "lbfgspp") that the batched in-house BFGS is benchmarked against.
 if(SDF_WITH_LBFGSPP)
-    find_path(LBFGSPP_INCLUDE_DIR LBFGS.h
-        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/LBFGSpp/include
-        NO_DEFAULT_PATH)
-    if(NOT LBFGSPP_INCLUDE_DIR)
-        message(STATUS "LBFGS++ not found — fetching v0.4.0")
-        FetchContent_Declare(lbfgspp
-            GIT_REPOSITORY https://github.com/yixuan/LBFGSpp.git
-            GIT_TAG        v0.4.0
-            GIT_SHALLOW    TRUE)
-        FetchContent_GetProperties(lbfgspp)
-        if(NOT lbfgspp_POPULATED)
-            FetchContent_Populate(lbfgspp)
-        endif()
-        set(LBFGSPP_INCLUDE_DIR ${lbfgspp_SOURCE_DIR}/include)
+    FetchContent_Declare(lbfgspp
+        GIT_REPOSITORY https://github.com/yixuan/LBFGSpp.git
+        GIT_TAG        v0.4.0
+        GIT_SHALLOW    TRUE)
+    FetchContent_GetProperties(lbfgspp)
+    if(NOT lbfgspp_POPULATED)
+        FetchContent_Populate(lbfgspp)
     endif()
 endif()
 
 # ── OpenMP ───────────────────────────────────────────────────────────
 if(USE_OPENMP)
-    find_package(OpenMP)
-    if(NOT OpenMP_CXX_FOUND AND APPLE)
+    # Apple clang ships without OpenMP; point FindOpenMP at Homebrew's libomp.
+    if(APPLE AND NOT OpenMP_CXX_FLAGS)
         execute_process(COMMAND brew --prefix libomp
-            OUTPUT_VARIABLE LIBOMP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
-        if(EXISTS "${LIBOMP_PREFIX}")
-            set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp")
-            set(OpenMP_CXX_LIB_NAMES "omp")
+            OUTPUT_VARIABLE LIBOMP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(EXISTS "${LIBOMP_PREFIX}/lib/libomp.dylib")
+            set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
+            set(OpenMP_CXX_LIB_NAMES omp)
             set(OpenMP_omp_LIBRARY "${LIBOMP_PREFIX}/lib/libomp.dylib")
-            include_directories("${LIBOMP_PREFIX}/include")
-            link_directories("${LIBOMP_PREFIX}/lib")
-            set(OpenMP_CXX_FOUND TRUE)
         endif()
     endif()
+    find_package(OpenMP)
 endif()
 
 # ── pybind11 ─────────────────────────────────────────────────────────
 if(BUILD_PYTHON_BINDINGS)
-    find_package(pybind11 CONFIG QUIET)
-    if(NOT pybind11_FOUND)
-        execute_process(
-            COMMAND python3 -m pybind11 --cmakedir
-            OUTPUT_VARIABLE _pybind11_dir
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE _pybind11_pip_rc)
-        if(_pybind11_pip_rc EQUAL 0 AND EXISTS "${_pybind11_dir}")
-            set(pybind11_DIR "${_pybind11_dir}")
-            find_package(pybind11 CONFIG QUIET)
-        endif()
+    # Pick one interpreter and build the module for it. FindPython honors
+    # -DPython_EXECUTABLE (or the legacy -DPYTHON_EXECUTABLE) and otherwise
+    # prefers the active conda env / virtualenv over whatever `python3` comes
+    # first on PATH, so the .so matches the Python that will import it.
+    if(PYTHON_EXECUTABLE AND NOT Python_EXECUTABLE)
+        set(Python_EXECUTABLE "${PYTHON_EXECUTABLE}")
     endif()
+    if(CMAKE_VERSION VERSION_LESS 3.18)
+        find_package(Python 3 REQUIRED COMPONENTS Interpreter Development)
+    else()
+        find_package(Python 3 REQUIRED COMPONENTS Interpreter Development.Module)
+    endif()
+    message(STATUS "Python bindings for ${Python_EXECUTABLE} (${Python_VERSION})")
+    set(PYBIND11_FINDPYTHON ON)  # pybind11 reuses the Python found above
+
+    # Prefer the pybind11 installed in that Python, then a system one, then fetch.
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
+        OUTPUT_VARIABLE _pybind11_dir OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    find_package(pybind11 CONFIG QUIET HINTS "${_pybind11_dir}")
     if(NOT pybind11_FOUND)
         message(STATUS "pybind11 not found — fetching v2.13.6")
         FetchContent_Declare(pybind11
@@ -255,10 +159,6 @@ if(BUILD_PYTHON_BINDINGS)
         FetchContent_MakeAvailable(pybind11)
     endif()
 endif()
-
-# ── Source dirs ──────────────────────────────────────────────────────
-set(BENCH_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../bench)
-set(ROOT_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 # ── Core static library ──────────────────────────────────────────────
 add_library(sdf_core STATIC
@@ -276,84 +176,41 @@ add_library(sdf_core STATIC
     src/existing_modules_adapter.cpp
 )
 
-target_include_directories(sdf_core PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+target_include_directories(sdf_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(sdf_core SYSTEM PUBLIC
     ${NANOFLANN_INCLUDE_DIR}
-    ${LIBIGL_INCLUDE_DIR}
-    ${BENCH_DIR}
-    ${ROOT_DIR}
-)
-
+    ${libigl_SOURCE_DIR}/include
+    ${CGAL_INCLUDE_DIR}
+    ${BOOST_INCLUDE_DIR})
 target_link_libraries(sdf_core PUBLIC Eigen3::Eigen)
+target_compile_definitions(sdf_core PUBLIC HAVE_CGAL)
 
-if(SDF_WITH_LBFGSPP AND LBFGSPP_INCLUDE_DIR)
-    target_include_directories(sdf_core SYSTEM PUBLIC ${LBFGSPP_INCLUDE_DIR})
+if(GMP_LIBRARY AND MPFR_LIBRARY)
+    target_link_libraries(sdf_core PUBLIC ${MPFR_LIBRARY} ${GMP_LIBRARY})
+else()
+    message(STATUS "GMP/MPFR not found — CGAL falls back to Boost.Multiprecision")
+    target_compile_definitions(sdf_core PUBLIC CGAL_DISABLE_GMP)
+endif()
+
+if(SDF_WITH_LBFGSPP)
+    target_include_directories(sdf_core SYSTEM PUBLIC ${lbfgspp_SOURCE_DIR}/include)
     target_compile_definitions(sdf_core PUBLIC SDF_HAVE_LBFGSPP)
 endif()
 
-# CPU-specific tuning. Must apply to ALL targets (sdf_core AND sdf_cpp) —
-# inconsistent vectorization between TUs causes Eigen ABI mismatch
-# (segfault in PUInterpolator::fit when types cross TU boundaries).
-if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-    target_compile_options(sdf_core PRIVATE -mcpu=apple-m1)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(sdf_core PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(sdf_core PUBLIC USE_OPENMP)
 endif()
 
-if(HAVE_CGAL)
-    target_include_directories(sdf_core SYSTEM PUBLIC
-        ${CGAL_INCLUDE_DIR} ${BOOST_INCLUDE_DIR})
-    target_compile_definitions(sdf_core PUBLIC HAVE_CGAL CGAL_USE_GMPXX=1)
-    target_link_libraries(sdf_core PUBLIC
-        ${GMPXX_LIBRARY} ${MPFR_LIBRARY} ${GMP_LIBRARY})
-    if(GMP_MPFR_FETCHED)
-        # ExternalProject_Add runs at build time; order the static lib
-        # build after gmp/mpfr install, and put their headers on sdf_core.
-        add_dependencies(sdf_core gmp_build mpfr_build)
-        target_include_directories(sdf_core SYSTEM PUBLIC ${GMP_MPFR_LOCAL_INCLUDE})
-    endif()
-endif()
-
+# Accelerate on macOS. On Linux, OpenBLAS is deliberately not linked: the hot
+# path is PU patches of 100–700 rows, where Eigen's own vectorized kernels beat
+# BLAS dispatch overhead (linking it measurably regressed runtime).
 if(APPLE)
     find_library(ACCELERATE_FRAMEWORK Accelerate)
     if(ACCELERATE_FRAMEWORK)
         target_link_libraries(sdf_core PUBLIC ${ACCELERATE_FRAMEWORK})
         target_compile_definitions(sdf_core PUBLIC EIGEN_USE_BLAS)
     endif()
-elseif(UNIX)
-    # Linux equivalent of Mac's Accelerate. Look for OpenBLAS in:
-    #   1. Bundled PyPI package at third_party/openblas (sudo-free option:
-    #      `uv pip install --target ... scipy_openblas32`)
-    #   2. System install (apt: libopenblas-dev)
-    set(BUNDLED_OPENBLAS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openblas/site-packages/scipy_openblas32")
-    if(EXISTS "${BUNDLED_OPENBLAS}/lib/libscipy_openblas.so")
-        set(OPENBLAS_LIBRARY "${BUNDLED_OPENBLAS}/lib/libscipy_openblas.so")
-        set(OPENBLAS_INCLUDE_DIR "${BUNDLED_OPENBLAS}/include")
-        message(STATUS "Using bundled scipy_openblas32 at ${BUNDLED_OPENBLAS}")
-    else()
-        find_library(OPENBLAS_LIBRARY NAMES openblas
-            HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib)
-        find_path(OPENBLAS_INCLUDE_DIR cblas.h
-            HINTS /usr/include /usr/include/x86_64-linux-gnu /usr/local/include)
-    endif()
-    if(OPENBLAS_LIBRARY)
-        # OpenBLAS is detected but NOT auto-linked. The hot path here is PU
-        # patches of 100–700 rows; Eigen's internal vectorized kernels
-        # (AVX2/AVX-512 via -march=native) beat the dispatch overhead of a
-        # BLAS call at that size. Auto-linking it measurably regressed
-        # runtime in our benchmarks. Future code that does need real BLAS
-        # (large dense solves) can opt in per-target.
-        message(STATUS "OpenBLAS detected at ${OPENBLAS_LIBRARY} — not linked (use Eigen-internal kernels)")
-    endif()
-endif()
-
-if(OpenMP_CXX_FOUND)
-    if(APPLE AND NOT TARGET OpenMP::OpenMP_CXX)
-        target_compile_options(sdf_core PUBLIC -Xpreprocessor -fopenmp)
-        target_include_directories(sdf_core PUBLIC "${LIBOMP_PREFIX}/include")
-        target_link_libraries(sdf_core PUBLIC "${LIBOMP_PREFIX}/lib/libomp.dylib")
-    else()
-        target_link_libraries(sdf_core PUBLIC OpenMP::OpenMP_CXX)
-    endif()
-    target_compile_definitions(sdf_core PUBLIC USE_OPENMP)
 endif()
 
 # ── Python bindings ──────────────────────────────────────────────────

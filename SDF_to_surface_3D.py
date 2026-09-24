@@ -1,13 +1,11 @@
 import os
-# torch (pulled in lazily via neural_sdf) and sdf_cpp each bundle their own
-# libomp; without this the second one to initialize aborts (OMP Error #15). Set
-# before anything can import torch so the neural-SDF source can run in-process.
-os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
 import trimesh
 import gpytoolbox as gpy
 import igl
 import numpy as np
 import time
+from enum import Enum
+from util import mesh_distances
 
 # Seed for all randomness in generate_test_mesh_data (scatter sampling, noise).
 # __main__ overrides this; importers can set it via `sdf3d.seed = ...` like data_dir.
@@ -19,7 +17,7 @@ class Options:
                  turn_off_short_arcs=False, export_short_arcs=False, export_projections=False, reg=0,
                  use_gt_gradients=False, interpolator_type='PU', interp_partition='sphere', overlap=0.2, cpp_dc=True,
                  post_processing=False, iter_gradient_finding='optimize', verbose=True,
-                pair_local=False, noise=0, bound=1, scatter=False, neural_sdf=None,
+                pair_local=False, noise=0, bound=1, scatter=False,
                 grad_optimizer='bfgs', extract_padding=0.0, degen_tol=1e-5):
         self.grid_len = grid_len
         self.max_iters = max_iters
@@ -55,16 +53,9 @@ class Options:
         self.gt_gradients = None  # set it manually if you want to use GT gradients for testing, e.g. from the intermediate output of generate_test_mesh_data
         self.gt_mesh = gt_mesh  # set it manually if you want to compute distances to GT mesh at the end, e.g. from the intermediate output of generate_test_mesh_data
 
-        self.tolerance = None  # set it manually if you want to adjust the tolerance for clamping, e.g. based on the mean spacing of the input points
-
         self.noise = noise
         self.bound = bound
         self.scatter = scatter
-
-        # Source the SDF from a neural field trained on the obj, computed in-process
-        # (no npz round-trip). None = exact mesh SDF; 'gt' / 'pc' / 'igr' = neural.
-        self.neural_sdf = neural_sdf
-        self.neural_retrain = False  # retrain the neural field instead of using the cached weights
     def print(self):
         print(f"Options: grid_len={self.grid_len}, name={self.name},"
               f" max_iters={self.max_iters}, clamp={self.clamp},"
@@ -80,28 +71,16 @@ class Options:
               f" degen_tol={self.degen_tol}",
               f" lr={self.lr}")
 
-class Tolerance:
-    def __init__(self, clamp_radius_ratio=0.2, clamp_sdf_tol=1e-3, angle_tol=np.radians(15)):
-        # 0.2 means gradient rotates 11.5 degrees at most
-        # 0.1 means gradient rotates 5.7 degrees at most
-        self.clamp_radius_ratio = clamp_radius_ratio # for clamping to the nearest arc point
-        self.clamp_sdf_tol = clamp_sdf_tol           # for clamping to the optimal point on visible boundary
-        self.float_tol = 1e-8
-        self.angle_tol = angle_tol
-
 def generate_test_mesh_data( path_to_mesh, outbase, grid_len=10, save=False, noise=0.0, bound=1.0, scatter=False ):
     '''
-    Loads a mesh from the given path and computes signed distances and gradients for its vertices.
-    Parameters:
-    path_to_mesh: str
-        The file path to the mesh.
+    Normalize the mesh at path_to_mesh to the unit cube and sample its exact SDF on a
+    grid_len^3 grid over the padded bounding box (or at uniform random positions if
+    scatter), optionally with Gaussian noise on the distances and truncated to |d| <= bound.
     Returns:
-    points: (N, 3) array of vertex coordinates
-        The vertices of the mesh.
-    distances: (N,) array of signed distance values
-        The signed distance values for each vertex.
-    gradients: (N, 3) array of gradient vectors
-        The gradient vectors at each vertex.
+    mesh:      the normalized trimesh (ground truth for error evaluation)
+    points:    (N, 3) sample positions
+    distances: (N,)   signed distances (negative inside)
+    gradients: (N, 3) unit ground-truth gradients
     '''
     # All random draws below (scatter points, noise) come from this generator,
     # seeded by the module-level `seed` (set in __main__, like data_dir).
@@ -131,7 +110,7 @@ def generate_test_mesh_data( path_to_mesh, outbase, grid_len=10, save=False, noi
     # Find the closest points on the mesh surface
     V = np.asarray(mesh.vertices, dtype=np.float64)
     F = np.asarray(mesh.faces, dtype=np.int32)
-    sq_dists, face_ids, closest = igl.point_mesh_squared_distance(points, V, F)
+    sq_dists, _, closest = igl.point_mesh_squared_distance(points, V, F)
     distances = np.sqrt(sq_dists)
 
     gradients = points - closest
@@ -145,7 +124,7 @@ def generate_test_mesh_data( path_to_mesh, outbase, grid_len=10, save=False, noi
     if noise > 0:
         distances += rng.normal(0, noise, distances.shape)
 
-    # Filter out points that are too close to the surface (within 0.1 units), also remove respective gradients
+    # Drop samples lying on the surface (|d| <= 1e-8): their gradient is undefined
     mask = np.abs(distances) > 1e-8
     points = points[mask]
     distances = distances[mask]
@@ -182,7 +161,7 @@ def test_rfta(options, save_gtmesh=False, screening_weight=10, parallel=True, fo
         points, distances = sdf
     else:
         base_name = path_to_obj.split('/')[-1].split('.')[0]
-        mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, noise=options.noise, bound=options.bound)  # Generate new data with 4096 points
+        _, points, distances, _ = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, noise=options.noise, bound=options.bound)
     # Export meshes to out/
     out_dir = 'out/' + path_to_obj.split('/')[-1].split('.')[0]
     os.makedirs(out_dir, exist_ok=True)
@@ -261,7 +240,7 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
         points, distances = sdf
     else:
         base_name = path_to_obj.split('/')[-1].split('.')[0]
-        mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, bound=options.bound)  # Generate new data with 4096 points
+        _, points, distances, _ = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, bound=options.bound)
     MESReconstruction = _import_mes()
     # Export meshes to out/
     out_dir = 'out/' + path_to_obj.split('/')[-1].split('.')[0]
@@ -277,12 +256,18 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
 
     print(f"Exported: {out_dir}/" + fname)
 
+def _import_sdf_cpp():
+    """ The compiled C++ module, built into cpp/build (see cpp/CMakeLists.txt). """
+    import sys
+    build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp', 'build')
+    if build_dir not in sys.path:
+        sys.path.insert(0, build_dir)
+    import sdf_cpp
+    return sdf_cpp
+
 def _build_cpp_options(options : Options):
     """ Translate a Python Options into a C++ sdf_cpp.Options and return it. """
-    import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cpp', 'build'))
-    import sdf_cpp
-    cpp_opts = sdf_cpp.Options()
+    cpp_opts = _import_sdf_cpp().Options()
     cpp_opts.grid_len = options.grid_len
     cpp_opts.max_iters = options.max_iters
     cpp_opts.clamp = options.clamp
@@ -296,17 +281,13 @@ def _build_cpp_options(options : Options):
     cpp_opts.export_projections = options.export_projections
     cpp_opts.export_short_arcs  = options.export_short_arcs
     cpp_opts.iter_gradient_finding = options.iter_gradient_finding
-    cpp_opts.grad_optimizer = getattr(options, 'grad_optimizer', 'bfgs')
+    cpp_opts.grad_optimizer = options.grad_optimizer
     cpp_opts.lr = options.lr
     cpp_opts.optim_steps = options.optim_steps
     cpp_opts.degen_tol = options.degen_tol
     cpp_opts.verbose = options.verbose
     if options.use_gt_gradients:
         cpp_opts.gt_gradients = options.gt_gradients
-    if options.tolerance is not None:
-        cpp_opts.tolerance.clamp_radius_ratio = options.tolerance.clamp_radius_ratio
-        cpp_opts.tolerance.clamp_sdf_tol = options.tolerance.clamp_sdf_tol
-        cpp_opts.tolerance.angle_tol = options.tolerance.angle_tol
     # Keep the C++ Options reachable from the Python one: main_algorithm fills
     # its degenerate_pts in place, so this is how a caller reads back which
     # short-arc candidates survived the filter (degen_tol.py does).
@@ -328,39 +309,19 @@ def test_our_method(options : Options, save_gtmesh=False):
     path_to_obj = options.path_to_obj
     iters = options.max_iters
     options.print()
-    if options.neural_sdf is not None:
-        # Source the SDF from a neural field trained on the obj, in-process — no
-        # npz round-trip. torch and sdf_cpp coexist thanks to KMP_DUPLICATE_LIB_OK
-        # (set at module import). options.neural_sdf selects the mode:
-        #   'gt' / 'pc' / 'igr'  (see neural_sdf.train_neural_sdf).
-        # No artificial noise is injected: the neural field is itself the
-        # imperfect (learned, smoothed) SDF, which is the point of the test. The
-        # exact mesh is kept for error evaluation.
-        from neural_sdf import generate_neural_sdf_data
-        base_name = path_to_obj.split('/')[-1].split('.')[0]
-        mesh, points, distances, _ = generate_neural_sdf_data(
-            path_to_obj, base_name, grid_len=grid_len, mode=options.neural_sdf,
-            bound=options.bound, scatter=options.scatter,
-            retrain=options.neural_retrain, verbose=options.verbose)
-        options.gt_mesh = mesh  # exact mesh kept for error evaluation
-    else:
-        base_name = path_to_obj.split('/')[-1].split('.')[0]
-        mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, noise=options.noise, bound=options.bound, scatter=options.scatter)  # Generate new data with 4096 points
-        options.gt_gradients = gt_gradients
-        options.gt_mesh = mesh
+    base_name = path_to_obj.split('/')[-1].split('.')[0]
+    mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh, noise=options.noise, bound=options.bound, scatter=options.scatter)
+    options.gt_gradients = gt_gradients
+    options.gt_mesh = mesh
 
     # Create and fit the interpolator
     timer = time.perf_counter()
-    import sys
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cpp', 'build'))
-    import sdf_cpp
-    cpp_opts = _build_cpp_options(options)
-    result = sdf_cpp.main_algorithm(points, distances, cpp_opts)
+    result = _import_sdf_cpp().main_algorithm(points, distances, _build_cpp_options(options))
     _vis = np.asarray(result.visibility_mask).ravel()
     print(f"Final visibility: {int((_vis != 0).sum())}/{len(_vis)} ({100.0 * (_vis != 0).mean():.2f}%)")
     print(f"  ⏱  {'Interpolator fitted':<30} {time.perf_counter() - timer:>7.2f} s")
 
-    """ ========================= output post+dc ========================= """
+    # ── surface extraction (dual contouring, optional Lipschitz post-fix) ──
     timer = time.perf_counter()
     bbox_min = np.array([points[:, 0].min(), points[:, 1].min(), points[:, 2].min()], dtype=np.float64) - options.extract_padding
     bbox_max = np.array([points[:, 0].max(), points[:, 1].max(), points[:, 2].max()], dtype=np.float64) + options.extract_padding
@@ -403,31 +364,6 @@ def test_our_method(options : Options, save_gtmesh=False):
     mesh_distances(recon, mesh, verbose=True)
     return points, distances
 
-def check_mesh_error(dir_to_meshes, path_to_gt, edge_chamfer=False):
-    """ Compute the mesh distance (Hausdorff and Chamfer) between meshes in dir_to_meshes and the ground truth mesh at path_to_gt. """
-    gt_mesh = trimesh.load(path_to_gt, force='mesh')
-    # Normalize the mesh to fit within a unit cube
-    min = np.min( gt_mesh.vertices, axis=0 )
-    max = np.max( gt_mesh.vertices, axis=0 )
-    gt_mesh.vertices -= (min + max) / 2
-    gt_mesh.vertices /= np.max( max - min )
-
-    meshes = os.listdir(dir_to_meshes)
-    meshes.sort()
-    print(f"{os.path.basename(dir_to_meshes):<30}")
-    import edgeChamfer
-    for mesh_file in meshes:
-        if mesh_file.endswith('.obj'):
-            mesh = trimesh.load(os.path.join(dir_to_meshes, mesh_file), force='mesh')
-            haus, chamfer, f1 = mesh_distances(mesh, gt_mesh)
-            if edge_chamfer:
-                ecd, ef1 = edgeChamfer.compute_ecd(mesh, gt_mesh, sample_num=1000_000)
-            print(f"{mesh_file:<50} against ground truth...", end='')
-            if edge_chamfer:
-                print(f"  Hausdorff: {haus:.5f}  Chamfer: {chamfer:.7f}  F1: {f1:.4f}  EdgeChamfer: {ecd:.5f}  EdgeF1: {ef1:.4f}")
-            else:
-                print(f"  Hausdorff: {haus:.5f}  Chamfer: {chamfer:.7f}  F1: {f1:.4f}")
-
 def test_mc(options : Options, save_gtmesh=False, sdf=None):
     """ Marching cubes directly on the (grid) SDF samples, no interpolation; export to out/<name>/. """
     grid_len = options.grid_len
@@ -437,11 +373,8 @@ def test_mc(options : Options, save_gtmesh=False, sdf=None):
         points, distances = sdf
     else:
         base_name = path_to_obj.split('/')[-1].split('.')[0]
-        mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh)  # Generate new data with 4096 points
-        options.gt_gradients = gt_gradients
-        options.gt_mesh = mesh
-    # --- Second window: marching cubes directly on sample points (原始网格点) ---
-    # 从点坐标反推网格结构，无需插值
+        _, points, distances, _ = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh)
+    # Recover the grid structure from the sample coordinates; no interpolation.
     xs = np.unique(np.round(points[:, 0], 8))
     ys = np.unique(np.round(points[:, 1], 8))
     zs = np.unique(np.round(points[:, 2], 8))
@@ -449,7 +382,7 @@ def test_mc(options : Options, save_gtmesh=False, sdf=None):
     ix = np.searchsorted(xs, np.round(points[:, 0], 8))
     iy = np.searchsorted(ys, np.round(points[:, 1], 8))
     iz = np.searchsorted(zs, np.round(points[:, 2], 8))
-    grid_values_direct = np.ones((nx, ny, nz))  # 缺失点默认为外部(+1)
+    grid_values_direct = np.ones((nx, ny, nz))  # missing samples count as outside (+1)
     grid_values_direct[ix, iy, iz] = distances
     sp = ((xs[-1]-xs[0])/(nx-1), (ys[-1]-ys[0])/(ny-1), (zs[-1]-zs[0])/(nz-1))
     from skimage.measure import marching_cubes
@@ -460,32 +393,160 @@ def test_mc(options : Options, save_gtmesh=False, sdf=None):
     trimesh.Trimesh(vertices=verts2, faces=faces2).export(f'{out_dir}/sample_points_{grid_len}.obj')
     print(f"Exported: {out_dir}/sample_points_{grid_len}.obj")
 
+class TangentPoints(Enum):
+    GT = 'gt'
+    OURS = 'ours'
+    RFTA = 'rfta'
+    MES = 'mes'
+
+def get_tangent_points(options : Options, method, save_gtmesh=False, screening_weight=10):
+    """ Get the tangent points (surface contact points) for the given options and method.
+
+        Returns
+        -------
+        tangent_pts: (M, 3) array of points lying on the reconstructed surface.
+            For OURS the tangent points are the SDF-sample projections and are 1:1 with
+            ``points``; for RFTA/MES they are the method's reconstructed point cloud and
+            need not be 1:1 with the input samples.
+        points:    (N, 3) input SDF sample coordinates.
+        distances: (N,)   signed distances at ``points``.
+    """
+    grid_len = options.grid_len
+    path_to_obj = options.path_to_obj
+    options.print()
+    base_name = path_to_obj.split('/')[-1].split('.')[0]
+    mesh, points, distances, gt_gradients = generate_test_mesh_data(path_to_obj, base_name, grid_len=grid_len, save=save_gtmesh)
+    options.gt_gradients = gt_gradients
+    options.gt_mesh = mesh
+    if method == TangentPoints.OURS:
+        # Iterative projection (C++ pipeline, same as test_our_method): tangent points are
+        # the SDF-sample projections onto the surface (points - distance * gradient). The
+        # optimization's gradients exist only to produce these projections; some come out
+        # non-visible / unreliable and the optimization excludes them via a mask when
+        # fitting. We mirror that by marking the invalid projections NaN so the
+        # reconstruction drops them. The valid tangent points stay index-aligned with
+        # points/distances (1:1).
+        result = _import_sdf_cpp().main_algorithm(points, distances, _build_cpp_options(options))
+        tangent_pts = np.array(result.projections, dtype=np.float64)  # copy: pybind view is read-only
+        vis = np.asarray(result.visibility_mask).reshape(-1).astype(bool)
+        tangent_pts[~vis] = np.nan
+    elif method == TangentPoints.RFTA:
+        # Reach for the Arcs: use the reconstructed point cloud as tangent points.
+        # NOTE: this point cloud is NOT 1:1 with the input samples (one sphere can
+        # contribute several or zero points), so only the useRBF=True reconstruction
+        # path (zero-level constraints) is valid for it.
+        _, _, P, _ = gpy.reach_for_the_arcs(
+            points, distances, return_point_cloud=True,
+            screening_weight=screening_weight, parallel=True, force_cpu=False)
+        tangent_pts = np.asarray(P, dtype=np.float64)
+    elif method == TangentPoints.MES:
+        # Maximal Empty Spheres: use the reconstructed oriented point cloud as tangent points.
+        # MES does NOT emit one contact point per input sample (fully-covered / interior
+        # samples produce none), so the count differs from len(points) and there is no 1:1
+        # correspondence -- again only the useRBF=True path is valid for it.
+        MESReconstruction = _import_mes()
+        *_, P, _ = MESReconstruction(points, distances, screening_weight=screening_weight, return_oriented_points=True)
+        tangent_pts = np.asarray(P, dtype=np.float64)
+        if tangent_pts.size == 0:
+            raise RuntimeError("MES returned no contact points; cannot build a tangent-point set.")
+    elif method == TangentPoints.GT:
+        # Ground truth: the tangent point of each SDF sample is its closest point on the GT
+        # mesh (the exact projection onto the true surface), 1:1 with points -- valid for
+        # both reconstruction paths.
+        gt = options.gt_mesh
+        if gt is None:
+            raise ValueError("GT tangent points require options.gt_mesh (set by generate_test_mesh_data).")
+        V = np.asarray(gt.vertices, dtype=np.float64)
+        F = np.asarray(gt.faces, dtype=np.int32)
+        _, _, closest = igl.point_mesh_squared_distance(points, V, F)
+        tangent_pts = np.asarray(closest, dtype=np.float64)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+    n_valid = int(np.isfinite(tangent_pts).all(axis=1).sum())
+    print(f"  [{method.value}] tangent points: {n_valid} valid / {len(tangent_pts)} total  (from {len(points)} SDF samples)")
+    return tangent_pts, points, distances
+
+def construct_mesh(tangent_pts, points, distances, useRBF : bool, options : Options, screening_weight=10):
+    """
+        If useRBF is True, construct mesh using RBF interpolation, otherwise use sPSR on the input points.
+        tangent_pts: (N, 3) array of tangent points corresponding to the input points. These
+            can be used to compute normals for the sPSR method, or treated as 0 value constraints for RBF interpolation.
+        points: (N, 3) array of point coordinates.
+        distances: (N,) array of signed distance values corresponding to the input points.
+        options: the RBF hyperparameters (reg, interp_overlap, interp_partition, pair_local)
+            and grid_len (for the adaptive extraction resolution) are read from here so this
+            reconstruction mirrors test_our_method's RBF -- in particular reg must be passed through
+            (the C++ ctor defaults to reg=1e-5, but Options.reg defaults to 0).
+        screening_weight: PSR screening weight for the sPSR (useRBF=False) path.
+        Returns a trimesh.Trimesh of the reconstructed surface.
+    """
+    # Invalid tangent points are flagged NaN by get_tangent_points (non-visible projections);
+    # drop them before reconstruction.
+    valid = np.isfinite(tangent_pts).all(axis=1)
+    if useRBF:
+        # Fit the C++ RBF (PU) interpolator to the SDF samples (value constraints) plus the
+        # valid tangent points (zero-level constraints), then extract the surface with the
+        # C++ dual-contouring path. Plain value RBF -- no gradient/Hermite constraints; the
+        # tangent points carry the surface information. No 1:1 correspondence between
+        # tangent_pts and points is required here.
+        sdf_cpp = _import_sdf_cpp()
+        resolution = _adaptive_resolution(points, options.grid_len)
+        print(f"Grid resolution for surface extraction: {resolution}")
+        tp = tangent_pts[valid]
+        interp = sdf_cpp.PUInterpolator(kernel='cubic', overlap=options.interp_overlap, reg=options.reg,
+                                        partition=options.interp_partition, pair_local=options.pair_local,
+                                        verbose=False)
+        fit_pts = np.vstack([points, tp])
+        fit_vals = np.concatenate([distances, np.zeros(len(tp))])
+        interp.fit(fit_pts, fit_vals)
+        bbox_min = points.min(axis=0) - options.extract_padding
+        bbox_max = points.max(axis=0) + options.extract_padding
+        verts, faces = interp.extract_surface(
+            bbox_min=bbox_min, bbox_max=bbox_max,
+            nx=resolution, ny=resolution, nz=resolution, iso=0.0, chunk_size=5000,
+            lipschitz_postfix=False, use_dual_contouring=True)
+        return trimesh.Trimesh(vertices=verts, faces=faces)
+    else:
+        # Screened Poisson on the tangent points. Normals are derived from the SDF samples:
+        # (point - tangent) points away from the surface for outside samples; flipping by the
+        # sign of the distance orients every normal outward. Requires tangent_pts 1:1 with
+        # points (true for OURS); restrict to the valid (index-aligned) subset.
+        tp = tangent_pts[valid]
+        pts = points[valid]
+        dst = distances[valid]
+        d = pts - tp
+        n = np.linalg.norm(d, axis=1, keepdims=True)
+        n[n < 1e-12] = 1.0
+        normals = (d / n) * np.sign(dst)[:, np.newaxis]
+        Vr, Fr = gpy.point_cloud_to_mesh(tp, normals, method='PSR', psr_screening_weight=screening_weight)
+        recon = trimesh.Trimesh(vertices=Vr, faces=Fr)
+        # sPSR can emit spurious closed "bubble" components floating outside the sampled
+        # region; drop any component lying entirely outside the input (SDF sample) bbox.
+        bmin, bmax = points.min(axis=0), points.max(axis=0)
+        comps = recon.split(only_watertight=False)
+        if len(comps) > 1:
+            kept = [c for c in comps
+                    if np.any(np.all((np.asarray(c.vertices) >= bmin)
+                                     & (np.asarray(c.vertices) <= bmax), axis=1))]
+            if not kept:  # never emit an empty mesh
+                kept = [max(comps, key=lambda m: len(m.faces))]
+            recon = trimesh.util.concatenate(kept)
+        return recon
+
 if __name__ == "__main__":
     t0 = time.perf_counter()
     seed = 1
-    batch = False
     data_dir = 'examples'
-    if batch:
-        for name in ['loewe']:
-            for grid_len in [10, 15, 20, 25, 30, 35, 40, 45, 50, 75, 100]:  # 20^3=8000 points, 30^3=27000 points
-                options = Options(name=name, grid_len=grid_len, max_iters=13, clamp=False, cpp_dc=True, verbose=True,
-                        export_short_arcs=False, export_projections=False, turn_off_short_arcs=True,
-                        use_gt_gradients=False, interpolator_type='PU', interp_partition='sphere',
-                        overlap=0.2, reg=0, post_processing=False, iter_gradient_finding='optimize')
-                # test_our_method(options, save_gtmesh=False)
-                # test_rfta(options, screening_weight=10, parallel=True)
-                # test_mes(options, save_gtmesh=False, screening_weight=10)
-            check_mesh_error(f'out/{name}', f'{data_dir}/{name}.obj')
-    else:
-        for length in [30]:
-            options = Options(name='eiffel', grid_len=length, clamp=True, optim_steps=5)
-            # options.grad_optimizer = "lbfgspp"  # 每点独立跑 LBFGS++
-            # options.grad_optimizer = "ascent"    # 固定步长投影梯度上升(原方法)
-            points, distances = test_our_method(options, save_gtmesh=False)
-            # test_rfta(options, screening_weight=10, parallel=True, sdf=(points, distances))
-            # test_mc(options, save_gtmesh=False, sdf=(points, distances))
-            # test_mes(options, save_gtmesh=False, screening_weight=10, sdf=(points, distances))
-        # check_mesh_error(f'out/{options.name}', f'{data_dir}/{options.name}.obj', edge_chamfer=True)
+    for length in [30]:
+        options = Options(name='bunny', grid_len=length)
+        points, distances = test_our_method(options, save_gtmesh=False)
+        # test_rfta(options, screening_weight=10, parallel=True, sdf=(points, distances))
+        # test_mc(options, save_gtmesh=False, sdf=(points, distances))
+        # test_mes(options, save_gtmesh=False, screening_weight=10, sdf=(points, distances))
+        # Tangent points from one method, surface rebuilt by RBF (useRBF=True) or sPSR (False):
+        # tangent_pts, points, distances = get_tangent_points(options, TangentPoints.GT)
+        # recon = construct_mesh(tangent_pts, points, distances, useRBF=True, options=options)
+        # recon.export(f'out/{options.name}/tangent_gt_rbf_{length}.obj')
 
     elapsed = time.perf_counter() - t0
     print(f"  ⏱  {'Total execution time':<30} {elapsed:>7.2f} s")
