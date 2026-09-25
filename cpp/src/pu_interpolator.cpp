@@ -3,6 +3,7 @@
 #include "kdtree.h"
 #include "dedup.h"
 #include <cmath>
+#include <limits>
 #include <algorithm>
 #include <numeric>
 #include <deque>
@@ -625,7 +626,6 @@ void PUInterpolator::fit(const Eigen::MatrixXd& points,
 
         tmp_patches[p].center = pi.center;
         tmp_patches[p].half_ext = pi.half_ext;
-        tmp_patches[p].bsphere_radius = pi.half_ext.norm();
         tmp_patches[p].interp = std::move(interp);
         valid[p] = 1;
     }
@@ -670,18 +670,6 @@ void PUInterpolator::fit(const Eigen::MatrixXd& points,
             f << "]}\n";
         }
     }
-
-    // Build patch center KDTree for fallback
-    int np = (int)patches_.size();
-    patch_centers_.resize(np, 3);
-    patch_radii_.resize(np);
-    for (int i = 0; i < np; i++) {
-        patch_centers_.row(i) = patches_[i].center.transpose();
-        patch_radii_(i) = patches_[i].bsphere_radius;
-    }
-
-    // Cache the patch-center KDTree so predict() never rebuilds it.
-    patch_tree_ = std::make_unique<KDTree3D>(patch_centers_);
 
     // Build BVH over patch AABBs for fast point-in-patch queries.
     build_patch_bvh();
@@ -824,6 +812,57 @@ void PUInterpolator::query_patches_containing(
     }
 }
 
+// Branch-and-bound over the patch BVH. The distance from `pt` to a node's
+// AABB lower-bounds the distance to every patch below it (each patch's AABB
+// contains its support), so subtrees farther than the best found are pruned.
+int PUInterpolator::query_nearest_patch(const Eigen::Vector3d& pt) const {
+    auto aabb_dist_sq = [&](const double* lo, const double* hi) {
+        double d2 = 0.0;
+        for (int k = 0; k < 3; k++) {
+            double e = std::max({lo[k] - pt(k), 0.0, pt(k) - hi[k]});
+            d2 += e * e;
+        }
+        return d2;
+    };
+
+    int best = -1;
+    double best_d2 = std::numeric_limits<double>::infinity();
+    if (patch_bvh_nodes_.empty()) return best;
+
+    int stack[128];
+    int sp = 0;
+    stack[sp++] = 0;
+    while (sp > 0) {
+        int nid = stack[--sp];
+        const auto& nd = patch_bvh_nodes_[nid];
+        if (aabb_dist_sq(nd.lo, nd.hi) >= best_d2) continue;
+        if (nd.left == -1) {
+            for (int k = nd.leaf_start; k < nd.leaf_start + nd.leaf_count; k++) {
+                int i = patch_bvh_leaves_[k];
+                double d2;
+                if (use_box_) {
+                    // Box support == its AABB.
+                    d2 = aabb_dist_sq(&patch_aabb_lo_[i*3], &patch_aabb_hi_[i*3]);
+                } else {
+                    const auto& p = patches_[i];
+                    double d = std::max((pt - p.center).norm() - p.half_ext(0), 0.0);
+                    d2 = d * d;
+                }
+                if (d2 < best_d2) { best_d2 = d2; best = i; }
+            }
+        } else {
+            // Push the farther child first so the nearer one is searched
+            // first and tightens best_d2 sooner.
+            const auto& L = patch_bvh_nodes_[nd.left];
+            const auto& R = patch_bvh_nodes_[nd.right];
+            bool left_near = aabb_dist_sq(L.lo, L.hi) <= aabb_dist_sq(R.lo, R.hi);
+            stack[sp++] = left_near ? nd.right : nd.left;
+            stack[sp++] = left_near ? nd.left : nd.right;
+        }
+    }
+    return best;
+}
+
 // ── predict ─────────────────────────────────────────────────────────
 
 Eigen::VectorXd PUInterpolator::predict(const Eigen::MatrixXd& x_new, int /*chunk_size*/) const {
@@ -923,12 +962,12 @@ Eigen::VectorXd PUInterpolator::predict(const Eigen::MatrixXd& x_new, int /*chun
             result(i) = num / den;
     }
 
-    // Fallback: uncovered points use nearest patch.
+    // Fallback: uncovered points use the patch whose support is nearest.
     #pragma omp parallel for schedule(dynamic, 256)
     for (int i = 0; i < M; i++) {
         if (weight_sum(i) <= 0) {
             Eigen::Vector3d pt = x_new.row(i);
-            auto [dist_sq, nearest] = patch_tree_->query_nearest(pt);
+            int nearest = query_nearest_patch(pt);
             Eigen::MatrixXd qpt = x_new.middleRows(i, 1);
             result(i) = patches_[nearest].interp->predict(qpt)(0);
         }
@@ -999,8 +1038,9 @@ void PUInterpolator::eval_gradients_pointwise(const Eigen::MatrixXd& x_new,
                 if (values_out) (*values_out)(i) = f;
             } else {
                 // Uncovered: outside every patch support, where ∇w_p = 0 for
-                // all patches, so the nearest patch's raw values are correct.
-                auto [dist_sq, nearest] = patch_tree_->query_nearest(pt);
+                // all patches, so the nearest-support patch's raw values are
+                // correct.
+                int nearest = query_nearest_patch(pt);
                 patches_[nearest].interp->predict_with_gradients(qpt, fp, g);
                 result.row(i) = g.row(0);
                 if (values_out) (*values_out)(i) = fp(0);
@@ -1153,13 +1193,13 @@ void PUInterpolator::eval_gradients(const Eigen::MatrixXd& x_new,
     }
 
     // Fallback: uncovered points sit outside every patch support, where ∇w_p=0
-    // for all patches, so the nearest patch's raw value/gradient are already
-    // correct.
+    // for all patches, so the nearest-support patch's raw value/gradient are
+    // already correct.
     #pragma omp parallel for schedule(dynamic, 256)
     for (int i = 0; i < M; i++) {
         if (W(i) <= 0) {
             Eigen::Vector3d pt = x_new.row(i);
-            auto [dist_sq, nearest] = patch_tree_->query_nearest(pt);
+            int nearest = query_nearest_patch(pt);
             Eigen::MatrixXd qpt = x_new.middleRows(i, 1);
             if (values_out) {
                 Eigen::VectorXd v;

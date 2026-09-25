@@ -69,7 +69,6 @@ private:
     struct Patch {
         Eigen::Vector3d center;
         Eigen::Vector3d half_ext;   // box: half-extents; sphere: (R, R, R)
-        double bsphere_radius;
         std::unique_ptr<DuchonInterpolator> interp;
     };
 
@@ -108,11 +107,6 @@ private:
     /// effects are negligible for the 0-level-set. If no noise, this can be set to a small value like 0.2.
     double dist_threshold_ = 2;
 
-    // For fallback nearest-patch lookup (tree cached after fit(), reused every predict())
-    Eigen::MatrixXd patch_centers_;
-    Eigen::VectorXd patch_radii_;
-    std::unique_ptr<KDTree3D> patch_tree_;
-
     // BVH over patch AABBs for fast point→containing-patches queries.
 public:
     struct PatchBVHNode {
@@ -130,6 +124,9 @@ private:
     void query_patches_containing(
         const Eigen::Vector3d& pt,
         std::vector<int>& out) const;
+    /// Patch whose support (box or ball) is closest to `pt`, measured to the
+    /// support surface. Used as the fallback for points no patch covers.
+    int query_nearest_patch(const Eigen::Vector3d& pt) const;
 };
 
 }  // namespace sdf
