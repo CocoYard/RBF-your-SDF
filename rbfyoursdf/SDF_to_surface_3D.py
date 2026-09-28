@@ -8,7 +8,7 @@ import igl
 import numpy as np
 import time
 from enum import Enum
-from .util import mesh_distances
+from rbfyoursdf.util import mesh_distances
 
 # Seed for all randomness in generate_test_mesh_data (scatter sampling, noise).
 # __main__ overrides this; importers can set it via `sdf3d.seed = ...` like data_dir.
@@ -254,8 +254,8 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
     print(f"Exported: {out_dir}/" + fname)
 
 def _import_sdf_cpp():
-    """ The compiled C++ module, built into cpp/build (see cpp/CMakeLists.txt). """
-    import rbfyoursdf_cpp
+    """ The compiled C++ module, built from cpp/ when the package is installed. """
+    from rbfyoursdf import rbfyoursdf_cpp
     return rbfyoursdf_cpp
 
 def _build_cpp_options(options : Options):

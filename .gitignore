@@ -5,6 +5,7 @@ __pycache__/
 .vscode
 
 cpp/build/
+build/
 out/
 additional_experiments/results/
 additional_experiments/backup/

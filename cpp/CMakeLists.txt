@@ -217,4 +217,6 @@ endif()
 if(BUILD_PYTHON_BINDINGS)
     pybind11_add_module(rbfyoursdf_cpp bindings/pybind_main.cpp)
     target_link_libraries(rbfyoursdf_cpp PRIVATE sdf_core)
+    # scikit-build-core packages whatever is installed; put it inside the rbfyoursdf package.
+    install(TARGETS rbfyoursdf_cpp LIBRARY DESTINATION rbfyoursdf)
 endif()

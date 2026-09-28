@@ -209,11 +209,10 @@ wheels = [
 [[package]]
 name = "rbfyoursdf"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "libigl" },
     { name = "numpy" },
-    { name = "rbfyoursdf-cpp" },
     { name = "scikit-image" },
     { name = "scipy" },
     { name = "trimesh" },
@@ -223,16 +222,10 @@ dependencies = [
 requires-dist = [
     { name = "libigl", specifier = ">=2.6.2" },
     { name = "numpy", specifier = ">=2.2.6" },
-    { name = "rbfyoursdf-cpp", editable = "cpp" },
     { name = "scikit-image", specifier = ">=0.26" },
     { name = "scipy", specifier = ">=1.15.0" },
     { name = "trimesh", specifier = ">=5.0.0" },
 ]
-
-[[package]]
-name = "rbfyoursdf-cpp"
-version = "0.1.0"
-source = { editable = "cpp" }
 
 [[package]]
 name = "scikit-image"
