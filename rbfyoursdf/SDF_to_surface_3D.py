@@ -8,7 +8,7 @@ import igl
 import numpy as np
 import time
 from enum import Enum
-from util import mesh_distances
+from .util import mesh_distances
 
 # Seed for all randomness in generate_test_mesh_data (scatter sampling, noise).
 # __main__ overrides this; importers can set it via `sdf3d.seed = ...` like data_dir.
@@ -255,12 +255,8 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
 
 def _import_sdf_cpp():
     """ The compiled C++ module, built into cpp/build (see cpp/CMakeLists.txt). """
-    import sys
-    build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp', 'build')
-    if build_dir not in sys.path:
-        sys.path.insert(0, build_dir)
-    import sdf_cpp
-    return sdf_cpp
+    import rbfyoursdf_cpp
+    return rbfyoursdf_cpp
 
 def _build_cpp_options(options : Options):
     """ Translate a Python Options into a C++ sdf_cpp.Options and return it. """
@@ -526,7 +522,8 @@ def construct_mesh(tangent_pts, points, distances, useRBF : bool, options : Opti
             recon = trimesh.util.concatenate(kept)
         return recon
 
-if __name__ == "__main__":
+def main():
+    global seed, data_dir
     t0 = time.perf_counter()
     seed = 1
     data_dir = 'examples'
@@ -543,3 +540,6 @@ if __name__ == "__main__":
 
     elapsed = time.perf_counter() - t0
     print(f"  ⏱  {'Total execution time':<30} {elapsed:>7.2f} s")
+
+if __name__ == "__main__":
+    main()

@@ -36,8 +36,7 @@ def load_sdf3d():
     `data_dir` must be absolute because run_cell() chdir's into the cell
     directory, and Options builds path_to_obj from it at construction time.
     """
-    sys.path.insert(0, str(REPO))
-    import SDF_to_surface_3D as sdf3d
+    from rbfyoursdf import SDF_to_surface_3D as sdf3d
     sdf3d.data_dir = str(REPO / 'examples')
     sdf3d.seed = SEED
     return sdf3d
@@ -53,7 +52,7 @@ def available(algos):
     without it still runs every other method instead of failing each cell.
     """
     global _mes_warned
-    from SDF_to_surface_3D import mes_available
+    from rbfyoursdf.SDF_to_surface_3D import mes_available
     if 'mes' not in algos or mes_available():
         return list(algos)
     if not _mes_warned:
@@ -83,7 +82,7 @@ def run_cell(exp, param, mesh, grid_len, algos, noise=0.0, bound=1.0, scatter=Fa
     level), so without one directory per cell the sweep would overwrite itself.
     It also gives the MES binary a private place to drop its pwn.csv.
     """
-    from SDF_to_surface_3D import (Options, generate_test_mesh_data,
+    from rbfyoursdf.SDF_to_surface_3D import (Options, generate_test_mesh_data,
                                    test_our_method, test_rfta, test_mes, test_mc)
 
     cell = _cell_dir(exp, param, mesh, grid_len)
@@ -144,7 +143,7 @@ def _mc_samples(points, distances, options, mesh, grid_len, noise, bound, scatte
     seeded with SEED.
     """
     import numpy as np
-    from SDF_to_surface_3D import generate_test_mesh_data
+    from rbfyoursdf.SDF_to_surface_3D import generate_test_mesh_data
 
     if bound >= 1.0:
         return points, distances
@@ -190,7 +189,7 @@ def evaluate(exp, param, mesh, grid_len, algos, verbose=True, **_):
     """Hausdorff / Chamfer / F1 of every reconstruction in one cell vs the GT."""
     import numpy as np
     import trimesh
-    from util import mesh_distances
+    from rbfyoursdf.util import mesh_distances
 
     rows = []
     out = _cell_dir(exp, param, mesh, grid_len) / 'out' / mesh

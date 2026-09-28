@@ -13,7 +13,7 @@ option(BUILD_PYTHON_BINDINGS "Build pybind11 Python module"                  ON)
 option(USE_OPENMP            "Enable OpenMP parallelism"                      ON)
 option(SDF_WITH_LBFGSPP      "Build the LBFGS++ reference gradient optimizer" ON)
 
-# CPU tuning — applied globally so sdf_core and sdf_cpp share the same Eigen
+# CPU tuning — applied globally so sdf_core and rbfyoursdf_cpp share the same Eigen
 # vectorization. Tuning only one target causes an Eigen ABI mismatch across
 # TU boundaries → segfault in PUInterpolator::fit.
 #
@@ -215,6 +215,6 @@ endif()
 
 # ── Python bindings ──────────────────────────────────────────────────
 if(BUILD_PYTHON_BINDINGS)
-    pybind11_add_module(sdf_cpp bindings/pybind_main.cpp)
-    target_link_libraries(sdf_cpp PRIVATE sdf_core)
+    pybind11_add_module(rbfyoursdf_cpp bindings/pybind_main.cpp)
+    target_link_libraries(rbfyoursdf_cpp PRIVATE sdf_core)
 endif()

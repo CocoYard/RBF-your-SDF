@@ -2,13 +2,13 @@
 
 This repository serves as the implementation of the paper.
 
-**Project Page:** https://cragl.cs.gmu.edu/rbfyoursdf/
+**Project Page:** <https://cragl.cs.gmu.edu/rbfyoursdf/>
 
 ## Contents
 
 - `cpp/` — the C++ core (gradient estimation, tangent-point projection, partition-of-unity
-  RBF fitting, surface extraction), exposed to Python as the `sdf_cpp` module.
-- `SDF_to_surface_3D.py` — samples an SDF from a mesh, runs our method, and reconstructs
+  RBF fitting, surface extraction), exposed to Python as the `rbfyoursdf_cpp` module.
+- `rbfyoursdf/SDF_to_surface_3D.py` — samples an SDF from a mesh, runs our method, and reconstructs
   the surface; also runs the baselines below.
 - `additional_experiments/` — scripts that reproduce the additional experiments.
 - `examples/` — the test meshes.
@@ -16,22 +16,25 @@ This repository serves as the implementation of the paper.
 ## Building
 
 ```bash
-cd cpp
-cmake -B build
-cmake --build build -j
+uv sync
 ```
 
-Missing C++ dependencies are fetched automatically. Build with the Python that you will run
-the scripts with (e.g. an activated conda environment). Install the Python packages with
+or
 
 ```bash
-pip install -r requirements.txt
+pip install .
 ```
 
 ## Running
 
 ```bash
-python SDF_to_surface_3D.py
+uv run rbfyoursdf/SDF_to_surface_3D.py
+```
+
+or
+
+```bash
+uv run python -m rbfyoursdf
 ```
 
 reconstructs `examples/eiffel.obj` from a 30³ SDF grid with our method and writes the

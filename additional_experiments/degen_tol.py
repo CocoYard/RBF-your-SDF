@@ -70,7 +70,7 @@ def run(grid_len, degen_tol):
     from disk alone, like the other experiments.
     """
     import numpy as np
-    from SDF_to_surface_3D import Options, test_our_method
+    from rbfyoursdf.SDF_to_surface_3D import Options, test_our_method
 
     cell = _cell(grid_len, degen_tol)
     out = cell / 'out' / MESH
@@ -146,7 +146,7 @@ def metrics():
     """
     import numpy as np
     import trimesh
-    from util import mesh_distances
+    from rbfyoursdf.util import mesh_distances
 
     rows = []
     for cand_npz in sorted(RESULTS.glob(f'*/{MESH}/candidates.npz')):

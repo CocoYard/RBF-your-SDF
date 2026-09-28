@@ -1,5 +1,0 @@
-numpy
-scipy
-trimesh
-libigl             # imported as `igl`
-scikit-image

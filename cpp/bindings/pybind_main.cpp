@@ -10,7 +10,7 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(sdf_cpp, m) {
+PYBIND11_MODULE(rbfyoursdf_cpp, m) {
     m.doc() = "C++ implementation of SDF gradient optimization";
 
     // ── Tolerance ───────────────────────────────────────────────────
