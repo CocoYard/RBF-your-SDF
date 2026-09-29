@@ -16,7 +16,7 @@ Two things are measured, and they answer different questions:
                      the ground truth, i.e. whether any of it reaches the
                      output.
 
-    python additional_experiments/degen_tol.py
+    uv run demo/additional_experiments/degen_tol.py
 
 Only `ours` runs: the threshold is a knob of our method, so no baseline has an
 answer to sweep. Everything else stays at the Options defaults.
@@ -90,7 +90,7 @@ def run(grid_len, degen_tol):
         options = Options(name=MESH, grid_len=grid_len, degen_tol=degen_tol)
         if _common._guard('ours', test_our_method, options) is None:
             return
-        # Set by _build_cpp_options; main_algorithm fills its degenerate_pts in
+        # Set by _run_ours; main_algorithm fills its degenerate_pts in
         # place, so these are the candidates that survived filter_degenerate_pts
         # — exactly the zero-valued points the second RBF fit was given.
         idx, pts = options.cpp_options.degenerate_points

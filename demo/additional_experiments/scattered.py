@@ -4,7 +4,7 @@ Draws the same number of samples uniformly at random inside the bounding box
 instead of on a regular grid, pairing every scattered cell with a grid cell at
 the same budget. Grid methods lose their grid; ours never used one.
 
-    python additional_experiments/scattered.py
+    uv run demo/additional_experiments/scattered.py
 """
 
 import _common

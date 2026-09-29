@@ -8,6 +8,7 @@ import igl
 import numpy as np
 import time
 from enum import Enum
+import rbfyoursdf
 from util import mesh_distances
 
 # Seed for all randomness in generate_test_mesh_data (scatter sampling, noise).
@@ -200,7 +201,7 @@ def test_rfta(options, save_gtmesh=False, screening_weight=10, parallel=True, fo
 def _mes_dir():
     """ Checkout of maxkohlbrenner/maximal-empty-spheres: $MES_DIR, else third_party/ in this repo. """
     return os.environ.get('MES_DIR') or os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), 'third_party', 'maximal-empty-spheres')
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'third_party', 'maximal-empty-spheres')
 
 def _import_mes():
     """ Import the optional MES baseline, or raise ImportError saying how to install it.
@@ -253,43 +254,35 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
 
     print(f"Exported: {out_dir}/" + fname)
 
-def _import_sdf_cpp():
-    """ The compiled C++ module, built into cpp/build (see cpp/CMakeLists.txt). """
-    import sys
-    build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp', 'build')
-    if build_dir not in sys.path:
-        sys.path.insert(0, build_dir)
-    import sdf_cpp
-    return sdf_cpp
-
-def _build_cpp_options(options : Options):
-    """ Translate a Python Options into a C++ sdf_cpp.Options and return it. """
-    cpp_opts = _import_sdf_cpp().Options()
-    cpp_opts.grid_len = options.grid_len
-    cpp_opts.max_iters = options.max_iters
-    cpp_opts.clamp = options.clamp
-    cpp_opts.reg = options.reg
-    cpp_opts.turn_off_short_arcs = options.turn_off_short_arcs
-    cpp_opts.interpolator_type = options.interpolator_type
-    cpp_opts.interp_partition = options.interp_partition
-    cpp_opts.interp_overlap = options.interp_overlap
-    cpp_opts.pair_local = options.pair_local
-    cpp_opts.name = options.name
-    cpp_opts.export_projections = options.export_projections
-    cpp_opts.export_short_arcs  = options.export_short_arcs
-    cpp_opts.iter_gradient_finding = options.iter_gradient_finding
-    cpp_opts.grad_optimizer = options.grad_optimizer
-    cpp_opts.lr = options.lr
-    cpp_opts.optim_steps = options.optim_steps
-    cpp_opts.degen_tol = options.degen_tol
-    cpp_opts.verbose = options.verbose
-    if options.use_gt_gradients:
-        cpp_opts.gt_gradients = options.gt_gradients
+def _run_ours(options : Options, points, distances):
+    """ Run rbfyoursdf.main_algorithm with the settings in options and return its MainResult. """
+    result, cpp_opts = rbfyoursdf.main_algorithm(
+        points, distances,
+        max_iters=options.max_iters,
+        clamp=options.clamp,
+        turn_off_short_arcs=options.turn_off_short_arcs,
+        reg=options.reg,
+        interpolator_type=options.interpolator_type,
+        interp_partition=options.interp_partition,
+        interp_overlap=options.interp_overlap,
+        pair_local=options.pair_local,
+        iter_gradient_finding=options.iter_gradient_finding,
+        grad_optimizer=options.grad_optimizer,
+        lr=options.lr,
+        optim_steps=options.optim_steps,
+        degen_tol=options.degen_tol,
+        gt_gradients=options.gt_gradients if options.use_gt_gradients else None,
+        verbose=options.verbose,
+        name=options.name,
+        grid_len=options.grid_len,
+        export_projections=options.export_projections,
+        export_short_arcs=options.export_short_arcs,
+        return_options=True)
     # Keep the C++ Options reachable from the Python one: main_algorithm fills
     # its degenerate_pts in place, so this is how a caller reads back which
     # short-arc candidates survived the filter (degen_tol.py does).
     options.cpp_options = cpp_opts
-    return cpp_opts
+    return result
 
 def _adaptive_resolution(points, grid_len):
     """ Dual-contouring grid resolution: ~target_cells_per_hint cells between adjacent SDF
@@ -301,7 +294,7 @@ def _adaptive_resolution(points, grid_len):
     return int(np.clip(np.ceil(extent / (hint_spacing / target_cells_per_hint)), 64, 512))
 
 def test_our_method(options : Options, save_gtmesh=False):
-    """ Run our pipeline (C++ sdf_cpp) on the SDF samples and export the reconstruction to out/<name>/. """
+    """ Run our pipeline (rbfyoursdf.main_algorithm) on the SDF samples and export the reconstruction to out/<name>/. """
     grid_len = options.grid_len
     path_to_obj = options.path_to_obj
     iters = options.max_iters
@@ -312,7 +305,7 @@ def test_our_method(options : Options, save_gtmesh=False):
 
     # Create and fit the interpolator
     timer = time.perf_counter()
-    result = _import_sdf_cpp().main_algorithm(points, distances, _build_cpp_options(options))
+    result = _run_ours(options, points, distances)
     _vis = np.asarray(result.visibility_mask).ravel()
     if options.verbose:
         print(f"Final visibility: {int((_vis != 0).sum())}/{len(_vis)} ({100.0 * (_vis != 0).mean():.2f}%)")
@@ -422,7 +415,7 @@ def get_tangent_points(options : Options, method, save_gtmesh=False, screening_w
         # fitting. We mirror that by marking the invalid projections NaN so the
         # reconstruction drops them. The valid tangent points stay index-aligned with
         # points/distances (1:1).
-        result = _import_sdf_cpp().main_algorithm(points, distances, _build_cpp_options(options))
+        result = _run_ours(options, points, distances)
         tangent_pts = np.array(result.projections, dtype=np.float64)  # copy: pybind view is read-only
         vis = np.asarray(result.visibility_mask).reshape(-1).astype(bool)
         tangent_pts[~vis] = np.nan
@@ -482,11 +475,10 @@ def construct_mesh(tangent_pts, points, distances, useRBF : bool, options : Opti
         # C++ dual-contouring path. Plain value RBF -- no gradient/Hermite constraints; the
         # tangent points carry the surface information. No 1:1 correspondence between
         # tangent_pts and points is required here.
-        sdf_cpp = _import_sdf_cpp()
         resolution = _adaptive_resolution(points, options.grid_len)
         print(f"Grid resolution for surface extraction: {resolution}")
         tp = tangent_pts[valid]
-        interp = sdf_cpp.PUInterpolator(kernel='cubic', overlap=options.interp_overlap, reg=options.reg,
+        interp = rbfyoursdf.PUInterpolator(kernel='cubic', overlap=options.interp_overlap, reg=options.reg,
                                         partition=options.interp_partition, pair_local=options.pair_local,
                                         verbose=False)
         fit_pts = np.vstack([points, tp])
@@ -526,7 +518,8 @@ def construct_mesh(tangent_pts, points, distances, useRBF : bool, options : Opti
             recon = trimesh.util.concatenate(kept)
         return recon
 
-if __name__ == "__main__":
+def main():
+    global seed, data_dir
     t0 = time.perf_counter()
     seed = 1
     data_dir = 'examples'
@@ -543,3 +536,6 @@ if __name__ == "__main__":
 
     elapsed = time.perf_counter() - t0
     print(f"  ⏱  {'Total execution time':<30} {elapsed:>7.2f} s")
+
+if __name__ == "__main__":
+    main()

@@ -4,7 +4,7 @@ Perturbs every sampled distance by Gaussian noise, so the input is no longer a
 consistent distance field. Sigma is in units of the unit-cube-normalized mesh,
 and the sweep runs from well below the sample spacing to above it.
 
-    python additional_experiments/noise.py
+    uv run demo/additional_experiments/noise.py
 """
 
 import _common

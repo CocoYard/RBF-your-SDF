@@ -1,0 +1,34 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "rbfyoursdf"
+version = "0.1.0"
+description = "RBF Your SDF: Radial Basis Function Interpolation of Signed Distance Fields with Implied Tangent Points"
+readme = "readme.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.2.6",
+]
+
+# Needed only by demo/ (the demo script and the additional experiments).
+[dependency-groups]
+demo = [
+    "libigl>=2.6.2",
+    "scipy>=1.15.0",
+    "trimesh>=5.0.0",
+    "scikit-image>=0.26",
+]
+
+[tool.scikit-build]
+cmake.source-dir = "cpp"
+wheel.packages = ["rbfyoursdf"]
+wheel.expand-macos-universal-tags = true
+# Persistent build dir so rebuilds are incremental (and don't re-fetch CGAL etc.).
+build-dir = "build/{wheel_tag}"
+
+[tool.uv]
+default-groups = ["demo"]
+# Rebuild the extension when the C++ sources change.
+cache-keys = [{ file = "pyproject.toml" }, { file = "cpp/**/*.{h,c,cpp,txt}" }]

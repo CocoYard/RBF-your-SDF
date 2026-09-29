@@ -16,8 +16,13 @@ import time
 import traceback
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+DEMO = Path(__file__).resolve().parents[1]
+REPO = DEMO.parent
 RESULTS = Path(__file__).resolve().parent / 'results'
+
+# The demo scripts (SDF_to_surface_3D, util) live one directory up.
+if str(DEMO) not in sys.path:
+    sys.path.insert(0, str(DEMO))
 
 # Seeds the random draws in generate_test_mesh_data (scattered point positions
 # and the noise added to the distances). Fixed so the whole sweep is
@@ -36,7 +41,6 @@ def load_sdf3d():
     `data_dir` must be absolute because run_cell() chdir's into the cell
     directory, and Options builds path_to_obj from it at construction time.
     """
-    sys.path.insert(0, str(REPO))
     import SDF_to_surface_3D as sdf3d
     sdf3d.data_dir = str(REPO / 'examples')
     sdf3d.seed = SEED

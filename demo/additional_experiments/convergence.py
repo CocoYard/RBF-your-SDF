@@ -4,7 +4,7 @@ Sweeps max_iters 0..15 per mesh, adds one max_iters=0 run without short arcs,
 and runs RFTA, MES and marching cubes once each as a reference line. Writes
 Hausdorff, Chamfer and F1 per run to results/convergence/metrics.csv.
 
-    python additional_experiments/convergence.py
+    uv run demo/additional_experiments/convergence.py
 """
 
 import os

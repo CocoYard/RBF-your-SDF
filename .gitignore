@@ -5,7 +5,8 @@ __pycache__/
 .vscode
 
 cpp/build/
+build/
 out/
-additional_experiments/results/
-additional_experiments/backup/
+demo/additional_experiments/results/
+demo/additional_experiments/backup/
 third_party/maximal-empty-spheres/
