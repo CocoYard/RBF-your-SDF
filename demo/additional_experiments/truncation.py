@@ -4,7 +4,7 @@ Keeps only the samples whose |SDF| falls inside a shrinking band around the
 surface, the way a TSDF from range data carries nothing far from it. The
 tightest band leaves a thin shell on a unit-cube-normalized mesh.
 
-    python additional_experiments/truncation.py
+    uv run demo/additional_experiments/truncation.py
 """
 
 import _common

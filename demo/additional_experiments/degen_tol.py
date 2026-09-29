@@ -16,7 +16,7 @@ Two things are measured, and they answer different questions:
                      the ground truth, i.e. whether any of it reaches the
                      output.
 
-    python additional_experiments/degen_tol.py
+    uv run demo/additional_experiments/degen_tol.py
 
 Only `ours` runs: the threshold is a knob of our method, so no baseline has an
 answer to sweep. Everything else stays at the Options defaults.
@@ -70,7 +70,7 @@ def run(grid_len, degen_tol):
     from disk alone, like the other experiments.
     """
     import numpy as np
-    from rbfyoursdf.SDF_to_surface_3D import Options, test_our_method
+    from SDF_to_surface_3D import Options, test_our_method
 
     cell = _cell(grid_len, degen_tol)
     out = cell / 'out' / MESH
@@ -90,7 +90,7 @@ def run(grid_len, degen_tol):
         options = Options(name=MESH, grid_len=grid_len, degen_tol=degen_tol)
         if _common._guard('ours', test_our_method, options) is None:
             return
-        # Set by _build_cpp_options; main_algorithm fills its degenerate_pts in
+        # Set by _run_ours; main_algorithm fills its degenerate_pts in
         # place, so these are the candidates that survived filter_degenerate_pts
         # — exactly the zero-valued points the second RBF fit was given.
         idx, pts = options.cpp_options.degenerate_points
@@ -146,7 +146,7 @@ def metrics():
     """
     import numpy as np
     import trimesh
-    from rbfyoursdf.util import mesh_distances
+    from util import mesh_distances
 
     rows = []
     for cand_npz in sorted(RESULTS.glob(f'*/{MESH}/candidates.npz')):

@@ -4,8 +4,8 @@ Rewrites each experiment's CSVs from whatever finished, re-running and
 regenerating nothing. Use it after a sweep that ran in several batches or was
 interrupted.
 
-    python additional_experiments/collect.py            # every experiment
-    python additional_experiments/collect.py noise      # just one
+    uv run demo/additional_experiments/collect.py            # every experiment
+    uv run demo/additional_experiments/collect.py noise      # just one
 """
 
 import sys

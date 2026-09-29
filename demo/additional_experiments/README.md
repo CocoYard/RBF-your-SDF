@@ -7,11 +7,11 @@ every parameter written at the top of the file, so reproducing a table means
 running the script and nothing else:
 
 ```bash
-python additional_experiments/scattered.py     # samples at random positions
-python additional_experiments/truncation.py    # samples only near the surface
-python additional_experiments/noise.py         # samples with noisy distances
-python additional_experiments/convergence.py   # iteration count 0..15
-python additional_experiments/degen_tol.py     # short-arc threshold 1e-4..1e-8
+uv run demo/additional_experiments/scattered.py     # samples at random positions
+uv run demo/additional_experiments/truncation.py    # samples only near the surface
+uv run demo/additional_experiments/noise.py         # samples with noisy distances
+uv run demo/additional_experiments/convergence.py   # iteration count 0..15
+uv run demo/additional_experiments/degen_tol.py     # short-arc threshold 1e-4..1e-8
 ```
 
 Run them from anywhere; they locate the repo themselves. `_common.py` holds the
@@ -142,8 +142,8 @@ To recompute both CSVs from whatever is already on disk, without re-running or
 regenerating anything:
 
 ```bash
-python additional_experiments/collect.py          # every experiment
-python additional_experiments/collect.py noise    # just one
+uv run demo/additional_experiments/collect.py          # every experiment
+uv run demo/additional_experiments/collect.py noise    # just one
 ```
 
 Cells are discovered from the directory tree, so a sweep run in several batches

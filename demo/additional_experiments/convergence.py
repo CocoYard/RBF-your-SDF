@@ -4,7 +4,7 @@ Sweeps max_iters 0..15 per mesh, adds one max_iters=0 run without short arcs,
 and runs RFTA, MES and marching cubes once each as a reference line. Writes
 Hausdorff, Chamfer and F1 per run to results/convergence/metrics.csv.
 
-    python additional_experiments/convergence.py
+    uv run demo/additional_experiments/convergence.py
 """
 
 import os
@@ -51,7 +51,7 @@ def run(mesh, grid_len, max_iters, short_arcs):
     We chdir into RESULTS because test_our_method exports to 'out/<mesh>/'
     relative to the working directory.
     """
-    from rbfyoursdf.SDF_to_surface_3D import Options, test_our_method
+    from SDF_to_surface_3D import Options, test_our_method
 
     arcs = 'shortArcs' if short_arcs else 'noShortArcs'
     stem = f'ours_{grid_len}_{max_iters}_{arcs}_'
@@ -83,7 +83,7 @@ def run_baselines(mesh, grid_len):
     _common.SEED, so regenerating the samples here reproduces them rather than
     drawing new ones, and the gap is the method and not its input.
     """
-    from rbfyoursdf.SDF_to_surface_3D import (Options, generate_test_mesh_data,
+    from SDF_to_surface_3D import (Options, generate_test_mesh_data,
                                    test_rfta, test_mes, test_mc)
 
     out = RESULTS / 'out' / mesh
@@ -124,7 +124,7 @@ def metrics():
     """
     import numpy as np
     import trimesh
-    from rbfyoursdf.util import mesh_distances
+    from util import mesh_distances
 
     rows = []
     root = RESULTS / 'out'

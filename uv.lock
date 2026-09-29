@@ -211,17 +211,23 @@ name = "rbfyoursdf"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "libigl" },
     { name = "numpy" },
+]
+
+[package.dev-dependencies]
+demo = [
+    { name = "libigl" },
     { name = "scikit-image" },
     { name = "scipy" },
     { name = "trimesh" },
 ]
 
 [package.metadata]
-requires-dist = [
+requires-dist = [{ name = "numpy", specifier = ">=2.2.6" }]
+
+[package.metadata.requires-dev]
+demo = [
     { name = "libigl", specifier = ">=2.6.2" },
-    { name = "numpy", specifier = ">=2.2.6" },
     { name = "scikit-image", specifier = ">=0.26" },
     { name = "scipy", specifier = ">=1.15.0" },
     { name = "trimesh", specifier = ">=5.0.0" },

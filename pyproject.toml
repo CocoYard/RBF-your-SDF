@@ -9,8 +9,13 @@ description = "RBF Your SDF: Radial Basis Function Interpolation of Signed Dista
 readme = "readme.md"
 requires-python = ">=3.12"
 dependencies = [
-    "libigl>=2.6.2",
     "numpy>=2.2.6",
+]
+
+# Needed only by demo/ (the demo script and the additional experiments).
+[dependency-groups]
+demo = [
+    "libigl>=2.6.2",
     "scipy>=1.15.0",
     "trimesh>=5.0.0",
     "scikit-image>=0.26",
@@ -24,5 +29,6 @@ wheel.expand-macos-universal-tags = true
 build-dir = "build/{wheel_tag}"
 
 [tool.uv]
+default-groups = ["demo"]
 # Rebuild the extension when the C++ sources change.
 cache-keys = [{ file = "pyproject.toml" }, { file = "cpp/**/*.{h,c,cpp,txt}" }]

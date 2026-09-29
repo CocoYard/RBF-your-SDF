@@ -10,18 +10,34 @@ This repository serves as the implementation of the paper.
 pip install "rbfyoursdf @ git+https://github.com/CocoYard/RBF-your-SDF"
 ```
 
+## Usage
+
+```python
+import rbfyoursdf
+
+# points: (N, 3) sample positions, values: (N,) signed distances (negative inside)
+result = rbfyoursdf.main_algorithm(points, values, max_iters=10)
+verts, faces = result.interpolator.extract_surface(
+    bbox_min=points.min(axis=0), bbox_max=points.max(axis=0),
+    nx=128, ny=128, nz=128, use_dual_contouring=True)
+```
+
+`result.projections` holds each sample's tangent point and `result.visibility_mask`
+whether it was used. See `help(rbfyoursdf.main_algorithm)` for all keyword arguments.
+
 ## Contents
 
+- `rbfyoursdf/` — the Python package: `main_algorithm` and the C++ bindings.
 - `cpp/` — the C++ core (gradient estimation, tangent-point projection, partition-of-unity
   RBF fitting, surface extraction), exposed to Python as the `rbfyoursdf.rbfyoursdf_cpp` module.
-- `rbfyoursdf/SDF_to_surface_3D.py` — samples an SDF from a mesh, runs our method, and reconstructs
+- `demo/SDF_to_surface_3D.py` — samples an SDF from a mesh, runs our method, and reconstructs
   the surface; also runs the baselines below.
-- `additional_experiments/` — scripts that reproduce the additional experiments.
+- `demo/additional_experiments/` — scripts that reproduce the additional experiments.
 - `examples/` — the test meshes.
 
 ## Building
 
-To run our experiments, clone the repository and run locally.
+To run the demo and our experiments, clone the repository and run locally.
 
 ```bash
 uv sync
@@ -30,30 +46,24 @@ uv sync
 or
 
 ```bash
-pip install .
+pip install . --group demo
 ```
 
 ## Running
 
 ```bash
-uv run -m rbfyoursdf
+uv run demo/SDF_to_surface_3D.py
 ```
 
-or
-
-```bash
-uv run rbfyoursdf/SDF_to_surface_3D.py
-```
-
-reconstructs `examples/eiffel.obj` from a 30³ SDF grid with our method and writes the
-mesh to `out/`. Edit the `__main__` block to pick another model, resolution or method.
+reconstructs `examples/bunny.obj` from a 30³ SDF grid with our method and writes the
+mesh to `out/`. Edit `main()` to pick another model, resolution or method.
 
 ## Methods
 
 - **Ours** — `test_our_method`
 - **Reach for the Arcs** — `test_rfta` (optional, via `gpytoolbox`)
 - **Maximal Empty Spheres** — `test_mes` (optional, needs a separate build; see
-  [additional_experiments/README.md](additional_experiments/README.md))
+  [demo/additional_experiments/README.md](demo/additional_experiments/README.md))
 - **Marching cubes** on the sample grid — `test_mc`
 
 **Is our improved performance due to better tangent points or RBF interpolation?** 
@@ -63,8 +73,8 @@ screened Poisson, isolating the quality of the tangent points from the reconstru
 
 ## Experiments
 
-Each script in `additional_experiments/` reproduces one table; see its
-[README](additional_experiments/README.md) for details.
+Each script in `demo/additional_experiments/` reproduces one table; see its
+[README](demo/additional_experiments/README.md) for details.
 
 | script | what it tests |
 | --- | --- |
