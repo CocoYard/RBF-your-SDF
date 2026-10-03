@@ -33,6 +33,13 @@ verts, faces = result.interpolator.extract_surface(
 `result.projections` holds each sample's tangent point and `result.visibility_mask`
 whether it was used. See `help(rbfyoursdf.main_algorithm)` for all keyword arguments.
 
+---
+
+> [!NOTE]
+> **Using the package does not require cloning this repository** — the `pip install` above
+> is all you need. The sections below are for running the demo, reproducing the paper's
+> experiments (with tag v1.0.0), or modifying the code.
+
 ## Contents
 
 - `rbfyoursdf/` — the Python package: `main_algorithm` and the C++ bindings.
