@@ -170,6 +170,14 @@ PYBIND11_MODULE(rbfyoursdf_cpp, m) {
           py::arg("query_points"), py::arg("sdf_points"),
           py::arg("sdf_values"), py::arg("epsilon") = 1e-8);
 
+    m.def("has_openmp", []() {
+#ifdef USE_OPENMP
+        return true;
+#else
+        return false;
+#endif
+    }, "Whether the module was built with OpenMP (multithreaded).");
+
     m.def("main_algorithm", &sdf::main_algorithm,
           py::arg("sdf_points"), py::arg("sdf_values"), py::arg("options"),
           "Run the full SDF gradient optimization pipeline.\n"

@@ -5,14 +5,24 @@ keyword arguments and builds the C++ ``Options`` from them; the bindings are
 re-exported for direct use.
 """
 
+import warnings
+
 import numpy as np
 
 from . import rbfyoursdf_cpp
 from .rbfyoursdf_cpp import (Options, Tolerance, MainResult, Interpolator,
-                             DuchonInterpolator, PUInterpolator, are_points_visible)
+                             DuchonInterpolator, PUInterpolator, are_points_visible,
+                             has_openmp)
 
 __all__ = ['main_algorithm', 'rbfyoursdf_cpp', 'Options', 'Tolerance', 'MainResult',
-           'Interpolator', 'DuchonInterpolator', 'PUInterpolator', 'are_points_visible']
+           'Interpolator', 'DuchonInterpolator', 'PUInterpolator', 'are_points_visible',
+           'has_openmp']
+
+if not has_openmp():
+    warnings.warn(
+        "rbfyoursdf was built without OpenMP and runs single-threaded (much slower). "
+        "For multithreading, install OpenMP (macOS: `brew install libomp`) and reinstall "
+        "with `pip install --force-reinstall --no-cache-dir`.", stacklevel=2)
 
 
 def main_algorithm(sdf_points, sdf_values, *,

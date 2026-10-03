@@ -4,6 +4,14 @@ This repository serves as the implementation of the paper.
 
 **Project Page:** <https://cragl.cs.gmu.edu/rbfyoursdf/>
 
+> [!IMPORTANT]
+> **Install OpenMP first for multithreading.** The package is compiled at install time;
+> without OpenMP it still works but runs **single-threaded**.
+> - **macOS:** `brew install libomp`
+> - **Linux:** GCC already ships OpenMP, nothing to do.
+>
+> Check with `rbfyoursdf.has_openmp()`.
+
 ## Installation
 
 ```bash

@@ -125,6 +125,13 @@ if(USE_OPENMP)
         endif()
     endif()
     find_package(OpenMP)
+    # Not fatal: single-threaded builds still work, just much slower.
+    if(NOT OpenMP_CXX_FOUND)
+        message(WARNING
+            "OpenMP not found: building single-threaded (much slower). For multithreading, "
+            "install OpenMP (macOS: `brew install libomp`; Linux: libgomp, usually bundled "
+            "with GCC) and reinstall with `pip install --force-reinstall --no-cache-dir`.")
+    endif()
 endif()
 
 # ── pybind11 ─────────────────────────────────────────────────────────
