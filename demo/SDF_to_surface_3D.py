@@ -255,7 +255,7 @@ def test_mes(options, save_gtmesh=False, screening_weight=10, sdf=None):
     print(f"Exported: {out_dir}/" + fname)
 
 def _run_ours(options : Options, points, distances):
-    """ Run rbfyoursdf.main_algorithm with the settings in options and return its MainResult. """
+    """ Run rbfyoursdf.main_algorithm with the settings in options and return its Result. """
     result, cpp_opts = rbfyoursdf.main_algorithm(
         points, distances,
         max_iters=options.max_iters,
@@ -277,7 +277,10 @@ def _run_ours(options : Options, points, distances):
         grid_len=options.grid_len,
         export_projections=options.export_projections,
         export_short_arcs=options.export_short_arcs,
-        return_options=True)
+        return_options=True,
+        # The samples are already in the frame the experiments were tuned in, and
+        # degen_tol.py compares cpp_options' points against the GT mesh directly.
+        normalize=False)
     # Keep the C++ Options reachable from the Python one: main_algorithm fills
     # its degenerate_pts in place, so this is how a caller reads back which
     # short-arc candidates survived the filter (degen_tol.py does).
@@ -522,7 +525,7 @@ def main():
     global seed, data_dir
     t0 = time.perf_counter()
     seed = 1
-    data_dir = 'examples'
+    data_dir = '../examples'
     for length in [30]:
         options = Options(name='bunny', grid_len=length, verbose=True)
         points, distances = test_our_method(options, save_gtmesh=False)

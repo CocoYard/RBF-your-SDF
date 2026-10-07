@@ -71,12 +71,6 @@ PYBIND11_MODULE(rbfyoursdf_cpp, m) {
             return py::make_tuple(I, o.batch.point_positions);
         }, "(sphere_idx, positions) of every short-arc midpoint, pre-filter.");
 
-    // ── MainResult ──────────────────────────────────────────────────
-    py::class_<sdf::MainResult>(m, "MainResult")
-        .def_readonly("projections", &sdf::MainResult::projections)
-        .def_readonly("visibility_mask", &sdf::MainResult::visibility_mask)
-        .def_readonly("interpolator", &sdf::MainResult::interpolator);
-
     // ── Interpolators ───────────────────────────────────────────────
     auto extract_surface_wrapper = [](const sdf::Interpolator& self,
                                       const Eigen::Vector3d& bbox_min,
@@ -161,6 +155,12 @@ PYBIND11_MODULE(rbfyoursdf_cpp, m) {
         .def("predict_gradients", &sdf::PUInterpolator::predict_gradients,
              py::arg("x_new"), py::arg("chunk_size") = 5000)
         .def("is_trained", &sdf::PUInterpolator::is_trained);
+
+    // ── MainResult ──────────────────────────────────────────────────
+    py::class_<sdf::MainResult>(m, "MainResult")
+        .def_readonly("projections", &sdf::MainResult::projections)
+        .def_readonly("visibility_mask", &sdf::MainResult::visibility_mask)
+        .def_readonly("interpolator", &sdf::MainResult::interpolator);
 
     // ── Functions ───────────────────────────────────────────────────
     m.def("are_points_visible",

@@ -1,11 +1,13 @@
 """ RBF Your SDF: reconstruct a surface from signed distance samples.
 
 A thin wrapper around the C++ module ``rbfyoursdf_cpp``. ``main_algorithm`` takes
-keyword arguments and builds the C++ ``Options`` from them; the bindings are
-re-exported for direct use.
+keyword arguments and builds the C++ ``Options`` from them; by default it also
+normalizes the input to a centered unit box, since the C++ tolerances are absolute
+lengths tuned at that scale. The bindings are re-exported for direct use.
 """
 
 import warnings
+from typing import Literal, overload
 
 import numpy as np
 
@@ -25,13 +27,80 @@ if not has_openmp():
         "with `pip install --force-reinstall --no-cache-dir`.", stacklevel=2)
 
 
+class ScaledInterpolator:
+    """ An interpolator fitted in normalized coordinates, queried in input coordinates.
+
+    The C++ interpolator was fitted to x' = (x - center) / scale with values
+    d' = d / scale, so f(x) = scale * f'(x') and grad f(x) = grad f'(x').
+    """
+
+    def __init__(self, interpolator, center, scale):
+        self.interpolator = interpolator  # the C++ interpolator, in normalized coordinates
+        self.center = center
+        self.scale = scale
+
+    def _to_unit(self, x):
+        return (np.asarray(x, dtype=np.float64) - self.center) / self.scale
+
+    @property
+    def verbose(self):
+        return self.interpolator.verbose
+
+    @verbose.setter
+    def verbose(self, value):
+        self.interpolator.verbose = value
+
+    def predict(self, x_new, chunk_size=None):
+        """ Signed distance at x_new (M, 3), shape (M, 1). """
+        args = () if chunk_size is None else (chunk_size,)
+        return self.scale * self.interpolator.predict(self._to_unit(x_new), *args)
+
+    def predict_gradients(self, x_new, chunk_size=None):
+        """ Gradient of the signed distance at x_new (M, 3), shape (M, 3). """
+        args = () if chunk_size is None else (chunk_size,)
+        return self.interpolator.predict_gradients(self._to_unit(x_new), *args)
+
+    def extract_surface(self, bbox_min, bbox_max, nx, ny, nz, iso=0.0, chunk_size=5000,
+                        lipschitz_postfix=True, use_dual_contouring=False):
+        """ Extract the iso level set inside [bbox_min, bbox_max] on an nx*ny*nz grid.
+            Returns (V, F) with V in input coordinates. """
+        V, F = self.interpolator.extract_surface(
+            self._to_unit(bbox_min), self._to_unit(bbox_max), nx, ny, nz,
+            iso=iso / self.scale, chunk_size=chunk_size,
+            lipschitz_postfix=lipschitz_postfix, use_dual_contouring=use_dual_contouring)
+        return np.asarray(V) * self.scale + self.center, F
+
+
+class Result:
+    """ main_algorithm's result in input coordinates.
+
+    projections: (N, 3) tangent point of every sample.
+    visibility_mask: (N,) 1 = visible, 0 = occluded.
+    interpolator: ScaledInterpolator with predict(), predict_gradients() and extract_surface().
+    center, scale: the normalization, x' = (x - center) / scale.
+    """
+
+    def __init__(self, result, center, scale):
+        self.projections = np.asarray(result.projections) * scale + center
+        self.visibility_mask = np.asarray(result.visibility_mask)
+        self.interpolator = ScaledInterpolator(result.interpolator, center, scale)
+        self.center = center
+        self.scale = scale
+
+
+@overload
+def main_algorithm(sdf_points, sdf_values, *, return_options: Literal[False] = False,
+                   **kwargs) -> Result: ...
+@overload
+def main_algorithm(sdf_points, sdf_values, *, return_options: Literal[True],
+                   **kwargs) -> tuple[Result, Options]: ...
 def main_algorithm(sdf_points, sdf_values, *,
                    max_iters=10, clamp=True, turn_off_short_arcs=False, reg=0,
                    interpolator_type='PU', interp_partition='sphere', interp_overlap=0.2,
                    pair_local=False, iter_gradient_finding='optimize', grad_optimizer='bfgs',
                    lr=0.2, optim_steps=5, degen_tol=1e-5, gt_gradients=None, verbose=True,
                    name='default', grid_len=20, export_projections=False, export_short_arcs=False,
-                   return_options=False):
+                   return_options=False, normalize=True):
     """ Estimate the tangent point of every SDF sample and fit an interpolator to them.
 
     Parameters
@@ -61,12 +130,15 @@ def main_algorithm(sdf_points, sdf_values, *,
     export_short_arcs: write a PLY file of the short-arc points to out/<name>/.
     return_options: also return the C++ Options, whose degenerate_points and
         short_arc_candidates are filled in by the run.
+    normalize: run on the input translated and scaled so that its bounding box is
+        centered at the origin with longest side spanning [-0.5, 0.5]. The
+        Options returned by return_options and the PLY exports stay in it too.
 
     Returns
     -------
-    MainResult with projections (N, 3), visibility_mask (N,) and the fitted
-    interpolator (with predict() and extract_surface()); or (MainResult, Options)
-    if return_options.
+    Result with projections (N, 3), visibility_mask (N,) and the fitted
+    interpolator (with predict() and extract_surface()), all in input
+    coordinates; or (Result, Options) if return_options.
     """
     opts = rbfyoursdf_cpp.Options()
     opts.max_iters = max_iters
@@ -92,5 +164,13 @@ def main_algorithm(sdf_points, sdf_values, *,
 
     points = np.asarray(sdf_points, dtype=np.float64)
     values = np.asarray(sdf_values, dtype=np.float64).ravel()
-    result = rbfyoursdf_cpp.main_algorithm(points, values, opts)
+    center, scale = np.zeros(3), 1.0
+    if normalize:
+        lo, hi = points.min(axis=0), points.max(axis=0)
+        center = (lo + hi) / 2
+        scale = float(np.max(hi - lo)) or 1.0  # a single point has zero extent
+        points = (points - center) / scale
+        values = values / scale
+
+    result = Result(rbfyoursdf_cpp.main_algorithm(points, values, opts), center, scale)
     return (result, opts) if return_options else result
